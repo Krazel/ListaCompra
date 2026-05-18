@@ -5,8 +5,11 @@ App nativa para gestionar una lista de la compra compartible.
 ## Funciones
 
 - Lista principal con productos, cantidades, categorias y borrado rapido.
-- Catalogo de productos ya creados para anadirlos con cantidad.
-- Plantillas personales como Compra semanal, Desayuno, Limpieza y Cena rapida.
+- Catalogo de productos ya creados para anadirlos con cantidad e imagen.
+- Creacion de productos con unidad, recurso visual interno o emoji.
+- Varias listas de compra y cambio de lista activa.
+- Plantillas personales creadas desde la lista actual.
+- Plantillas base como Compra semanal, Desayuno, Limpieza y Cena rapida.
 - Pantalla de compartir con miembros, permisos y texto listo para enviar.
 - Persistencia local en el dispositivo.
 

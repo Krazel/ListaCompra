@@ -1,21 +1,20 @@
 package com.dmkr.listacompra;
 
-import android.app.AlertDialog;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
-import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -33,11 +32,12 @@ public class MainActivity extends Activity {
     private static final String PREFS = "lista_compra";
 
     private final ArrayList<Product> products = new ArrayList<>();
-    private final ArrayList<ShoppingItem> items = new ArrayList<>();
+    private final ArrayList<ShoppingList> lists = new ArrayList<>();
     private final ArrayList<PresetList> presets = new ArrayList<>();
     private final ArrayList<Member> members = new ArrayList<>();
 
     private SharedPreferences prefs;
+    private String activeListId = "";
     private int currentTab = 0;
     private boolean canEdit = true;
     private int quantity = 1;
@@ -49,14 +49,6 @@ public class MainActivity extends Activity {
     private final int muted = Color.parseColor("#9CA69D");
     private final int accent = Color.parseColor("#23C16B");
     private final int danger = Color.parseColor("#E34E49");
-    private final int[] iconColors = {
-        Color.parseColor("#8BC49F"),
-        Color.parseColor("#EE9D48"),
-        Color.parseColor("#5AADE8"),
-        Color.parseColor("#EBC65A"),
-        Color.parseColor("#E75D52"),
-        Color.parseColor("#9DC65E")
-    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,37 +65,41 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(36), dp(20), dp(96));
+        root.setPadding(dp(20), dp(36), dp(20), dp(100));
         scroll.addView(root);
         frame.addView(scroll);
 
         if (currentTab == 0) showList(root);
-        if (currentTab == 1) showAdd(root);
-        if (currentTab == 2) showPresets(root);
-        if (currentTab == 3) showShare(root);
+        else if (currentTab == 1) showAdd(root);
+        else if (currentTab == 2) showPresets(root);
+        else if (currentTab == 3) showShare(root);
+        else showMore(root);
 
-        frame.addView(bottomNav(), new FrameLayout.LayoutParams(-1, dp(72), Gravity.BOTTOM));
+        frame.addView(bottomNav(), new FrameLayout.LayoutParams(-1, dp(74), Gravity.BOTTOM));
         setContentView(frame);
     }
 
     private void showList(LinearLayout root) {
+        ShoppingList list = activeList();
         root.addView(header("Lista de la compra", pendingCount() + " pendientes"));
+
         LinearLayout chips = new LinearLayout(this);
         chips.setOrientation(LinearLayout.HORIZONTAL);
         chips.addView(chip("Compartida"));
         chips.addView(withLeft(chip(members.size() + " personas"), 8));
+        chips.addView(withLeft(chip(list.name), 8));
         root.addView(withBottom(chips, 14));
 
         LinearLayout metrics = new LinearLayout(this);
         metrics.setOrientation(LinearLayout.HORIZONTAL);
-        metrics.addView(metric("Total", String.valueOf(items.size())), new LinearLayout.LayoutParams(0, dp(78), 1));
+        metrics.addView(metric("Total", String.valueOf(list.items.size())), new LinearLayout.LayoutParams(0, dp(78), 1));
         metrics.addView(withLeft(metric("Pendiente", String.valueOf(pendingCount())), 10), new LinearLayout.LayoutParams(0, dp(78), 1));
         metrics.addView(withLeft(metric("Hecho", String.valueOf(doneCount())), 10), new LinearLayout.LayoutParams(0, dp(78), 1));
         root.addView(withBottom(metrics, 18));
 
         root.addView(section("Por comprar"));
         int pending = 0;
-        for (ShoppingItem item : items) {
+        for (ShoppingItem item : list.items) {
             if (!item.checked) {
                 root.addView(itemRow(item));
                 pending++;
@@ -115,39 +111,29 @@ public class MainActivity extends Activity {
             LinearLayout doneHeader = new LinearLayout(this);
             doneHeader.setGravity(Gravity.CENTER_VERTICAL);
             doneHeader.addView(section("Comprado"), new LinearLayout.LayoutParams(0, -2, 1));
-            Button clear = textButton("Limpiar", v -> {
-                items.removeIf(i -> i.checked);
+            doneHeader.addView(textButton("Limpiar", v -> {
+                list.items.removeIf(i -> i.checked);
                 save();
                 render();
-            });
-            doneHeader.addView(clear, new LinearLayout.LayoutParams(dp(98), dp(42)));
-            root.addView(withTop(doneHeader, 8));
-            for (ShoppingItem item : items) {
-                if (item.checked) root.addView(itemRow(item));
-            }
+            }), new LinearLayout.LayoutParams(dp(98), dp(42)));
+            root.addView(doneHeader);
+            for (ShoppingItem item : list.items) if (item.checked) root.addView(itemRow(item));
         }
     }
 
     private void showAdd(LinearLayout root) {
-        root.addView(header("Anadir productos", "Elige del catalogo y ajusta la cantidad."));
-        Button search = actionButton("Buscar producto", v -> showSearchDialog());
-        root.addView(withBottom(search, 12), new LinearLayout.LayoutParams(-1, dp(48)));
+        root.addView(header("Anadir producto", "Catalogo con imagen o emoji por producto."));
+        root.addView(withBottom(actionButton("Buscar producto", v -> showSearchDialog()), 12), new LinearLayout.LayoutParams(-1, dp(48)));
 
         LinearLayout qty = card();
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.addView(label("Cantidad", 15, text, true), new LinearLayout.LayoutParams(0, -2, 1));
-        row.addView(textButton("-", v -> {
-            quantity = Math.max(1, quantity - 1);
-            render();
-        }), new LinearLayout.LayoutParams(dp(46), dp(40)));
+        row.addView(textButton("-", v -> { quantity = Math.max(1, quantity - 1); render(); }), new LinearLayout.LayoutParams(dp(46), dp(40)));
         TextView value = label(String.valueOf(quantity), 18, text, true);
         value.setGravity(Gravity.CENTER);
         row.addView(value, new LinearLayout.LayoutParams(dp(46), dp(40)));
-        row.addView(textButton("+", v -> {
-            quantity++;
-            render();
-        }), new LinearLayout.LayoutParams(dp(46), dp(40)));
+        row.addView(textButton("+", v -> { quantity++; render(); }), new LinearLayout.LayoutParams(dp(46), dp(40)));
         qty.addView(row);
         root.addView(withBottom(qty, 14));
 
@@ -156,7 +142,7 @@ public class MainActivity extends Activity {
         for (Product product : products) {
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
             lp.width = (getResources().getDisplayMetrics().widthPixels - dp(52)) / 2;
-            lp.height = dp(154);
+            lp.height = dp(158);
             lp.setMargins(0, 0, dp(12), dp(12));
             grid.addView(productCard(product), lp);
         }
@@ -164,42 +150,82 @@ public class MainActivity extends Activity {
 
         LinearLayout custom = card();
         custom.addView(label("Crear producto", 18, text, true));
-        Button create = actionButton("Nuevo producto", v -> showCreateProductDialog());
-        custom.addView(withTop(create, 12), new LinearLayout.LayoutParams(-1, dp(48)));
-        root.addView(withTop(custom, 4));
+        custom.addView(withTop(actionButton("Nuevo producto", v -> showCreateProductDialog()), 12), new LinearLayout.LayoutParams(-1, dp(48)));
+        root.addView(custom);
     }
 
     private void showPresets(LinearLayout root) {
-        root.addView(header("Listas base", "Plantillas personales para repetir compras."));
+        root.addView(header("Listas predeterminadas", "Crea y usa listas para ahorrar tiempo."));
+        LinearLayout create = card();
+        create.addView(label("Crear con la lista actual", 18, text, true));
+        create.addView(withTop(actionButton("Guardar predeterminada", v -> showCreatePresetDialog()), 12), new LinearLayout.LayoutParams(-1, dp(48)));
+        root.addView(withBottom(create, 14));
         for (PresetList preset : presets) root.addView(presetCard(preset));
     }
 
     private void showShare(LinearLayout root) {
-        root.addView(header("Compartida", "Gestiona personas y envia la lista."));
+        root.addView(header("Compartir lista", "Gestiona miembros y envia la lista."));
         LinearLayout panel = card();
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(label(members.size() + " personas", 18, text, true), new LinearLayout.LayoutParams(0, -2, 1));
-        top.addView(textButton("Enviar", v -> shareList()), new LinearLayout.LayoutParams(dp(108), dp(42)));
+        top.addView(resourceIcon("app_group", 58));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setPadding(dp(12), 0, 0, 0);
+        copy.addView(label(activeList().name, 18, text, true));
+        copy.addView(label(members.size() + " personas", 13, muted, false));
+        top.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        top.addView(textButton("Enviar", v -> shareList()), new LinearLayout.LayoutParams(dp(96), dp(42)));
         panel.addView(top);
-        Button edit = actionButton(canEdit ? "Permitir edicion: si" : "Permitir edicion: no", v -> {
+        panel.addView(withTop(actionButton(canEdit ? "Permitir editar: si" : "Permitir editar: no", v -> {
             canEdit = !canEdit;
             save();
             render();
-        });
-        panel.addView(withTop(edit, 12), new LinearLayout.LayoutParams(-1, dp(48)));
-        Button invite = actionButton("Invitar", v -> showInviteDialog());
-        panel.addView(withTop(invite, 10), new LinearLayout.LayoutParams(-1, dp(48)));
+        }), 12), new LinearLayout.LayoutParams(-1, dp(48)));
+        panel.addView(withTop(actionButton("Invitar", v -> showInviteDialog()), 10), new LinearLayout.LayoutParams(-1, dp(48)));
         root.addView(withBottom(panel, 14));
 
         for (Member member : members) root.addView(memberRow(member));
 
         LinearLayout preview = card();
         preview.addView(label("Vista previa", 18, text, true));
-        TextView copy = label(shareText(), 14, muted, false);
-        copy.setPadding(0, dp(10), 0, 0);
-        preview.addView(copy);
-        root.addView(withTop(preview, 8));
+        TextView body = label(shareText(), 14, muted, false);
+        body.setPadding(0, dp(10), 0, 0);
+        preview.addView(body);
+        root.addView(preview);
+    }
+
+    private void showMore(LinearLayout root) {
+        root.addView(header("Mas", "Crea listas y cambia la lista activa."));
+        LinearLayout create = card();
+        create.addView(label("Nueva lista", 18, text, true));
+        create.addView(withTop(actionButton("Crear lista", v -> showCreateListDialog()), 12), new LinearLayout.LayoutParams(-1, dp(48)));
+        root.addView(withBottom(create, 14));
+
+        for (ShoppingList list : lists) {
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(12), dp(12), dp(12), dp(12));
+            row.setBackground(rounded(surface, 8));
+            TextView state = label(list.id.equals(activeListId) ? "OK" : "--", 13, list.id.equals(activeListId) ? accent : muted, true);
+            state.setGravity(Gravity.CENTER);
+            row.addView(state, new LinearLayout.LayoutParams(dp(42), dp(42)));
+            LinearLayout textBox = new LinearLayout(this);
+            textBox.setOrientation(LinearLayout.VERTICAL);
+            textBox.addView(label(list.name, 17, text, true));
+            textBox.addView(label(list.items.size() + " productos", 13, muted, false));
+            row.addView(textBox, new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(textButton("Usar", v -> { activeListId = list.id; save(); render(); }), new LinearLayout.LayoutParams(dp(72), dp(42)));
+            row.addView(textButton("Borrar", v -> {
+                if (lists.size() > 1) {
+                    lists.remove(list);
+                    if (activeListId.equals(list.id)) activeListId = lists.get(0).id;
+                    save();
+                    render();
+                }
+            }), new LinearLayout.LayoutParams(dp(82), dp(42)));
+            root.addView(withBottom(row, 10));
+        }
     }
 
     private View itemRow(ShoppingItem item) {
@@ -208,39 +234,23 @@ public class MainActivity extends Activity {
         row.setPadding(dp(12), dp(12), dp(12), dp(12));
         row.setBackground(rounded(surface, 8));
 
-        Button check = textButton(item.checked ? "✓" : "○", v -> {
+        row.addView(textButton(item.checked ? "OK" : "", v -> {
             item.checked = !item.checked;
             save();
             render();
-        });
-        row.addView(check, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        row.addView(productIcon(item.product, 42));
+        }), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        row.addView(productIcon(item.product, 46));
 
-        LinearLayout copy = new LinearLayout(this);
-        copy.setOrientation(LinearLayout.VERTICAL);
-        copy.setPadding(dp(10), 0, 0, 0);
-        copy.addView(label(item.product.name, 16, item.checked ? muted : text, true));
-        copy.addView(label(item.product.category, 13, muted, false));
-        row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout textBox = new LinearLayout(this);
+        textBox.setOrientation(LinearLayout.VERTICAL);
+        textBox.setPadding(dp(10), 0, 0, 0);
+        textBox.addView(label(item.product.name, 16, item.checked ? muted : text, true));
+        textBox.addView(label(item.quantity + " " + item.product.unit, 13, muted, false));
+        row.addView(textBox, new LinearLayout.LayoutParams(0, -2, 1));
 
-        row.addView(textButton("-", v -> {
-            item.quantity = Math.max(1, item.quantity - 1);
-            save();
-            render();
-        }), new LinearLayout.LayoutParams(dp(34), dp(38)));
-        TextView qty = label(item.quantity + " " + item.product.unit, 13, text, true);
-        qty.setGravity(Gravity.CENTER);
-        row.addView(qty, new LinearLayout.LayoutParams(dp(56), dp(38)));
-        row.addView(textButton("+", v -> {
-            item.quantity++;
-            save();
-            render();
-        }), new LinearLayout.LayoutParams(dp(34), dp(38)));
-        row.addView(textButton("🗑", v -> {
-            items.remove(item);
-            save();
-            render();
-        }), new LinearLayout.LayoutParams(dp(42), dp(38)));
+        row.addView(textButton("-", v -> { item.quantity = Math.max(1, item.quantity - 1); save(); render(); }), new LinearLayout.LayoutParams(dp(36), dp(38)));
+        row.addView(textButton("+", v -> { item.quantity++; save(); render(); }), new LinearLayout.LayoutParams(dp(36), dp(38)));
+        row.addView(textButton("Borrar", v -> { activeList().items.remove(item); save(); render(); }), new LinearLayout.LayoutParams(dp(76), dp(38)));
         return withBottom(row, 10);
     }
 
@@ -252,13 +262,14 @@ public class MainActivity extends Activity {
         card.setOnClickListener(v -> {
             addProduct(product, quantity);
             Toast.makeText(this, product.name + " anadido", Toast.LENGTH_SHORT).show();
+            currentTab = 0;
             render();
         });
-        card.addView(productIcon(product, 46));
+        card.addView(productIcon(product, 54));
         card.addView(withTop(label(product.name, 16, text, true), 10));
-        card.addView(label(product.category, 12, muted, true));
+        card.addView(label(product.unit, 12, muted, true));
         TextView add = label("+ Anadir", 13, accent, true);
-        add.setPadding(0, dp(12), 0, 0);
+        add.setPadding(0, dp(10), 0, 0);
         card.addView(add);
         return card;
     }
@@ -267,11 +278,7 @@ public class MainActivity extends Activity {
         LinearLayout card = card();
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView icon = label(preset.icon, 20, accent, true);
-        icon.setGravity(Gravity.CENTER);
-        icon.setBackground(rounded(withAlpha(accent, 32), 8));
-        row.addView(icon, new LinearLayout.LayoutParams(dp(46), dp(46)));
-
+        row.addView(resourceIcon(preset.imageName, 66));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         copy.setPadding(dp(12), 0, 0, 0);
@@ -284,17 +291,15 @@ public class MainActivity extends Activity {
                 if (p != null) addProduct(p, 1);
             }
             save();
-            Toast.makeText(this, "Lista anadida", Toast.LENGTH_SHORT).show();
             currentTab = 0;
             render();
         }), new LinearLayout.LayoutParams(dp(84), dp(42)));
         card.addView(row);
-
         LinearLayout icons = new LinearLayout(this);
         icons.setPadding(0, dp(12), 0, 0);
         for (String name : preset.productNames) {
             Product product = findProduct(name);
-            if (product != null) icons.addView(productIcon(product, 32));
+            if (product != null) icons.addView(productIcon(product, 34));
         }
         card.addView(icons);
         return withBottom(card, 12);
@@ -305,24 +310,43 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(12), dp(12), dp(12), dp(12));
         row.setBackground(rounded(surface, 8));
-
         TextView avatar = label(initials(member.name), 14, Color.WHITE, true);
         avatar.setGravity(Gravity.CENTER);
         avatar.setBackground(rounded(accent, 8));
         row.addView(avatar, new LinearLayout.LayoutParams(dp(42), dp(42)));
-
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         copy.setPadding(dp(12), 0, 0, 0);
         copy.addView(label(member.name, 16, text, true));
         copy.addView(label(member.permission, 13, muted, false));
         row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-        row.addView(textButton("Borrar", v -> {
-            members.remove(member);
-            save();
-            render();
-        }), new LinearLayout.LayoutParams(dp(86), dp(42)));
+        row.addView(textButton("Borrar", v -> { members.remove(member); save(); render(); }), new LinearLayout.LayoutParams(dp(86), dp(42)));
         return withBottom(row, 10);
+    }
+
+    private View productIcon(Product product, int size) {
+        if (!product.emoji.trim().isEmpty()) {
+            TextView emoji = label(product.emoji.trim(), Math.max(18, size / 2), text, true);
+            emoji.setGravity(Gravity.CENTER);
+            emoji.setBackground(rounded(surfaceSoft, 8));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(size), dp(size));
+            lp.setMargins(0, 0, dp(6), 0);
+            emoji.setLayoutParams(lp);
+            return emoji;
+        }
+        return resourceIcon(product.imageName, size);
+    }
+
+    private View resourceIcon(String imageName, int size) {
+        ImageView image = new ImageView(this);
+        int resId = getResources().getIdentifier(imageName, "drawable", getPackageName());
+        if (resId == 0) resId = getResources().getIdentifier("product_default", "drawable", getPackageName());
+        image.setImageResource(resId);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(size), dp(size));
+        lp.setMargins(0, 0, dp(6), 0);
+        image.setLayoutParams(lp);
+        return image;
     }
 
     private View header(String title, String subtitle) {
@@ -339,18 +363,288 @@ public class MainActivity extends Activity {
         nav.setGravity(Gravity.CENTER);
         nav.setPadding(dp(6), dp(6), dp(6), dp(6));
         nav.setBackgroundColor(surface);
-        String[] labels = {"Lista", "Anadir", "Listas", "Compartir"};
+        String[] labels = {"Lista", "Anadir", "Pred.", "Compartir", "Mas"};
         for (int i = 0; i < labels.length; i++) {
             final int tab = i;
-            TextView item = label(labels[i], 12, currentTab == tab ? accent : muted, true);
+            TextView item = label(labels[i], 11, currentTab == tab ? accent : muted, true);
             item.setGravity(Gravity.CENTER);
-            item.setOnClickListener(v -> {
-                currentTab = tab;
-                render();
-            });
+            item.setOnClickListener(v -> { currentTab = tab; render(); });
             nav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
         }
         return nav;
+    }
+
+    private void showSearchDialog() {
+        EditText input = input("Buscar producto");
+        new AlertDialog.Builder(this)
+            .setTitle("Buscar producto")
+            .setView(input)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Anadir", (dialog, which) -> {
+                String query = input.getText().toString().trim().toLowerCase(Locale.ROOT);
+                for (Product product : products) {
+                    if (product.name.toLowerCase(Locale.ROOT).contains(query) || product.category.toLowerCase(Locale.ROOT).contains(query)) {
+                        addProduct(product, quantity);
+                        currentTab = 0;
+                        render();
+                        return;
+                    }
+                }
+            })
+            .show();
+    }
+
+    private void showCreateProductDialog() {
+        LinearLayout form = dialogForm();
+        EditText name = input("Nombre");
+        EditText category = input("Categoria");
+        EditText unit = input("Unidad, ej. ud, kg, l");
+        EditText emoji = input("Emoji opcional");
+        EditText image = input("Imagen interna, ej. product_default");
+        image.setText("product_default");
+        form.addView(name);
+        form.addView(category);
+        form.addView(unit);
+        form.addView(emoji);
+        form.addView(image);
+        new AlertDialog.Builder(this)
+            .setTitle("Nuevo producto")
+            .setView(form)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Guardar", (dialog, which) -> {
+                String cleaned = name.getText().toString().trim();
+                if (!cleaned.isEmpty()) {
+                    String safeUnit = unit.getText().toString().trim().isEmpty() ? "ud" : unit.getText().toString().trim();
+                    String imageName = image.getText().toString().trim().isEmpty() ? Product.defaultImage(cleaned) : image.getText().toString().trim();
+                    products.add(new Product(cleaned, blankTo(category.getText().toString(), "Otros"), safeUnit, imageName, emoji.getText().toString().trim()));
+                    save();
+                    render();
+                }
+            })
+            .show();
+    }
+
+    private void showCreatePresetDialog() {
+        EditText input = input("Nombre");
+        new AlertDialog.Builder(this)
+            .setTitle("Nueva predeterminada")
+            .setView(input)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Guardar", (dialog, which) -> {
+                String name = input.getText().toString().trim();
+                if (!name.isEmpty()) {
+                    ArrayList<String> names = new ArrayList<>();
+                    for (ShoppingItem item : activeList().items) names.add(item.product.name);
+                    presets.add(new PresetList(name, "preset_weekly", names));
+                    save();
+                    render();
+                }
+            })
+            .show();
+    }
+
+    private void showCreateListDialog() {
+        EditText input = input("Nombre");
+        new AlertDialog.Builder(this)
+            .setTitle("Nueva lista")
+            .setView(input)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Crear", (dialog, which) -> {
+                String name = input.getText().toString().trim();
+                if (!name.isEmpty()) {
+                    ShoppingList list = new ShoppingList(name);
+                    lists.add(list);
+                    activeListId = list.id;
+                    save();
+                    render();
+                }
+            })
+            .show();
+    }
+
+    private void showInviteDialog() {
+        EditText input = input("Nombre");
+        new AlertDialog.Builder(this)
+            .setTitle("Invitar")
+            .setView(input)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Anadir", (dialog, which) -> {
+                String cleaned = input.getText().toString().trim();
+                if (!cleaned.isEmpty()) {
+                    members.add(new Member(cleaned, "Puede editar"));
+                    save();
+                    render();
+                }
+            })
+            .show();
+    }
+
+    private void shareList() {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_TEXT, shareText());
+        startActivity(Intent.createChooser(send, "Compartir lista"));
+    }
+
+    private void addProduct(Product product, int amount) {
+        ShoppingList list = activeList();
+        for (ShoppingItem item : list.items) {
+            if (item.product.name.equals(product.name) && !item.checked) {
+                item.quantity += Math.max(1, amount);
+                save();
+                return;
+            }
+        }
+        list.items.add(0, new ShoppingItem(product, Math.max(1, amount), false));
+        save();
+    }
+
+    private ShoppingList activeList() {
+        for (ShoppingList list : lists) if (list.id.equals(activeListId)) return list;
+        if (lists.isEmpty()) {
+            ShoppingList list = new ShoppingList("Lista de la compra");
+            lists.add(list);
+            activeListId = list.id;
+        }
+        return lists.get(0);
+    }
+
+    private Product findProduct(String name) {
+        for (Product product : products) if (product.name.equals(name)) return product;
+        return null;
+    }
+
+    private int pendingCount() {
+        int count = 0;
+        for (ShoppingItem item : activeList().items) if (!item.checked) count++;
+        return count;
+    }
+
+    private int doneCount() {
+        int count = 0;
+        for (ShoppingItem item : activeList().items) if (item.checked) count++;
+        return count;
+    }
+
+    private String shareText() {
+        StringBuilder builder = new StringBuilder(activeList().name).append("\n");
+        for (ShoppingItem item : activeList().items) {
+            builder.append("- ").append(item.product.name).append(": ").append(item.quantity).append(" ").append(item.product.unit);
+            if (item.checked) builder.append(" (comprado)");
+            builder.append("\n");
+        }
+        return builder.toString();
+    }
+
+    private void load() {
+        loadProducts();
+        loadLists();
+        loadPresets();
+        loadMembers();
+        canEdit = prefs.getBoolean("canEdit", true);
+    }
+
+    private void loadProducts() {
+        products.clear();
+        String raw = prefs.getString("products.v2", "");
+        if (!raw.isEmpty()) {
+            try {
+                JSONArray array = new JSONArray(raw);
+                for (int i = 0; i < array.length(); i++) products.add(Product.from(array.getJSONObject(i)));
+            } catch (Exception ignored) {
+                products.clear();
+            }
+        }
+        if (products.isEmpty()) {
+            products.add(new Product("Leche", "Lacteos", "l", "product_milk", ""));
+            products.add(new Product("Pan", "Panaderia", "ud", "product_bread", ""));
+            products.add(new Product("Huevos", "Lacteos", "uds", "product_eggs", ""));
+            products.add(new Product("Tomates", "Frescos", "g", "product_tomato", ""));
+            products.add(new Product("Platanos", "Fruta", "kg", "product_banana", ""));
+            products.add(new Product("Manzanas", "Fruta", "kg", "product_apple", ""));
+            products.add(new Product("Detergente", "Limpieza", "ud", "product_detergent", ""));
+            products.add(new Product("Papel higienico", "Limpieza", "uds", "product_paper", ""));
+            products.add(new Product("Aceite de oliva", "Despensa", "ud", "product_oil", ""));
+        }
+    }
+
+    private void loadLists() {
+        lists.clear();
+        String raw = prefs.getString("lists.v2", "");
+        if (!raw.isEmpty()) {
+            try {
+                JSONArray array = new JSONArray(raw);
+                for (int i = 0; i < array.length(); i++) lists.add(ShoppingList.from(array.getJSONObject(i)));
+            } catch (Exception ignored) {
+                lists.clear();
+            }
+        }
+        if (lists.isEmpty()) {
+            ShoppingList list = new ShoppingList("Lista de la compra");
+            for (String name : Arrays.asList("Leche", "Pan", "Huevos", "Tomates", "Platanos", "Detergente", "Papel higienico")) {
+                Product product = findProduct(name);
+                if (product != null) list.items.add(new ShoppingItem(product, name.equals("Tomates") ? 500 : 1, false));
+            }
+            lists.add(list);
+        }
+        activeListId = prefs.getString("activeListId.v2", lists.get(0).id);
+    }
+
+    private void loadPresets() {
+        presets.clear();
+        String raw = prefs.getString("presets.v2", "");
+        if (!raw.isEmpty()) {
+            try {
+                JSONArray array = new JSONArray(raw);
+                for (int i = 0; i < array.length(); i++) presets.add(PresetList.from(array.getJSONObject(i)));
+            } catch (Exception ignored) {
+                presets.clear();
+            }
+        }
+        if (presets.isEmpty()) {
+            presets.add(new PresetList("Compra semanal", "preset_weekly", Arrays.asList("Pan", "Leche", "Huevos", "Tomates", "Platanos", "Detergente")));
+            presets.add(new PresetList("Desayuno", "preset_breakfast", Arrays.asList("Pan", "Leche", "Huevos")));
+            presets.add(new PresetList("Limpieza", "preset_cleaning", Arrays.asList("Detergente", "Papel higienico")));
+            presets.add(new PresetList("Cena rapida", "preset_dinner", Arrays.asList("Aceite de oliva", "Tomates", "Pan")));
+        }
+    }
+
+    private void loadMembers() {
+        members.clear();
+        String raw = prefs.getString("members", "");
+        if (!raw.isEmpty()) {
+            try {
+                JSONArray array = new JSONArray(raw);
+                for (int i = 0; i < array.length(); i++) members.add(Member.from(array.getJSONObject(i)));
+            } catch (Exception ignored) {
+                members.clear();
+            }
+        }
+        if (members.isEmpty()) {
+            members.add(new Member("Tu", "Propietario"));
+            members.add(new Member("Laura", "Puede editar"));
+        }
+    }
+
+    private void save() {
+        JSONArray productsJson = new JSONArray();
+        JSONArray listsJson = new JSONArray();
+        JSONArray presetsJson = new JSONArray();
+        JSONArray membersJson = new JSONArray();
+        try {
+            for (Product product : products) productsJson.put(product.toJson());
+            for (ShoppingList list : lists) listsJson.put(list.toJson());
+            for (PresetList preset : presets) presetsJson.put(preset.toJson());
+            for (Member member : members) membersJson.put(member.toJson());
+        } catch (Exception ignored) { }
+        prefs.edit()
+            .putString("products.v2", productsJson.toString())
+            .putString("lists.v2", listsJson.toString())
+            .putString("presets.v2", presetsJson.toString())
+            .putString("members", membersJson.toString())
+            .putString("activeListId.v2", activeListId)
+            .putBoolean("canEdit", canEdit)
+            .apply();
     }
 
     private View metric(String title, String value) {
@@ -361,16 +655,6 @@ public class MainActivity extends Activity {
         box.addView(label(title, 12, muted, true));
         box.addView(label(value, 22, text, true));
         return box;
-    }
-
-    private View productIcon(Product product, int size) {
-        TextView icon = label(product.icon, Math.max(14, size / 2), iconColors[product.tint % iconColors.length], true);
-        icon.setGravity(Gravity.CENTER);
-        icon.setBackground(rounded(withAlpha(iconColors[product.tint % iconColors.length], 36), 8));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(size), dp(size));
-        lp.setMargins(0, 0, dp(6), 0);
-        icon.setLayoutParams(lp);
-        return icon;
     }
 
     private TextView section(String value) {
@@ -419,7 +703,7 @@ public class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(title);
         button.setTextColor(accent);
-        button.setTextSize(14);
+        button.setTextSize(13);
         button.setTypeface(Typeface.DEFAULT_BOLD);
         button.setAllCaps(false);
         button.setBackground(rounded(surfaceSoft, 8));
@@ -437,125 +721,18 @@ public class MainActivity extends Activity {
         return label;
     }
 
-    private void showSearchDialog() {
+    private EditText input(String hint) {
         EditText input = new EditText(this);
-        input.setHint("Buscar producto");
-        input.setTextColor(Color.BLACK);
+        input.setHint(hint);
         input.setSingleLine(true);
-        new AlertDialog.Builder(this)
-            .setTitle("Buscar producto")
-            .setView(input)
-            .setNegativeButton("Cancelar", null)
-            .setPositiveButton("Buscar", (dialog, which) -> {
-                String query = input.getText().toString().trim().toLowerCase(Locale.ROOT);
-                Product product = null;
-                for (Product candidate : products) {
-                    if (candidate.name.toLowerCase(Locale.ROOT).contains(query) || candidate.category.toLowerCase(Locale.ROOT).contains(query)) {
-                        product = candidate;
-                        break;
-                    }
-                }
-                if (product != null) {
-                    addProduct(product, quantity);
-                    Toast.makeText(this, product.name + " anadido", Toast.LENGTH_SHORT).show();
-                    render();
-                }
-            })
-            .show();
+        return input;
     }
 
-    private void showCreateProductDialog() {
+    private LinearLayout dialogForm() {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(18), dp(8), dp(18), 0);
-        EditText name = new EditText(this);
-        name.setHint("Nombre");
-        EditText category = new EditText(this);
-        category.setHint("Categoria");
-        form.addView(name);
-        form.addView(category);
-        new AlertDialog.Builder(this)
-            .setTitle("Nuevo producto")
-            .setView(form)
-            .setNegativeButton("Cancelar", null)
-            .setPositiveButton("Guardar", (dialog, which) -> {
-                String cleaned = name.getText().toString().trim();
-                if (!cleaned.isEmpty()) {
-                    products.add(new Product(cleaned, category.getText().toString().trim().isEmpty() ? "Otros" : category.getText().toString().trim(), "ud", "*", products.size() % iconColors.length));
-                    save();
-                    render();
-                }
-            })
-            .show();
-    }
-
-    private void showInviteDialog() {
-        EditText input = new EditText(this);
-        input.setHint("Nombre");
-        new AlertDialog.Builder(this)
-            .setTitle("Invitar")
-            .setView(input)
-            .setNegativeButton("Cancelar", null)
-            .setPositiveButton("Anadir", (dialog, which) -> {
-                String cleaned = input.getText().toString().trim();
-                if (!cleaned.isEmpty()) {
-                    members.add(new Member(cleaned, "Puede editar"));
-                    save();
-                    render();
-                }
-            })
-            .show();
-    }
-
-    private void shareList() {
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_TEXT, shareText());
-        startActivity(Intent.createChooser(send, "Compartir lista"));
-    }
-
-    private void addProduct(Product product, int amount) {
-        for (ShoppingItem item : items) {
-            if (item.product.name.equals(product.name) && !item.checked) {
-                item.quantity += Math.max(1, amount);
-                save();
-                return;
-            }
-        }
-        items.add(0, new ShoppingItem(product, Math.max(1, amount), false));
-        save();
-    }
-
-    private Product findProduct(String name) {
-        for (Product product : products) if (product.name.equals(name)) return product;
-        return null;
-    }
-
-    private int pendingCount() {
-        int count = 0;
-        for (ShoppingItem item : items) if (!item.checked) count++;
-        return count;
-    }
-
-    private int doneCount() {
-        int count = 0;
-        for (ShoppingItem item : items) if (item.checked) count++;
-        return count;
-    }
-
-    private String shareText() {
-        StringBuilder builder = new StringBuilder("Lista de la compra\n");
-        for (ShoppingItem item : items) {
-            builder.append("- ")
-                .append(item.product.name)
-                .append(": ")
-                .append(item.quantity)
-                .append(" ")
-                .append(item.product.unit);
-            if (item.checked) builder.append(" (comprado)");
-            builder.append("\n");
-        }
-        return builder.toString();
+        return form;
     }
 
     private String initials(String name) {
@@ -567,100 +744,9 @@ public class MainActivity extends Activity {
         return result.isEmpty() ? "?" : result;
     }
 
-    private void load() {
-        loadProducts();
-        loadItems();
-        loadPresets();
-        loadMembers();
-        canEdit = prefs.getBoolean("canEdit", true);
-    }
-
-    private void loadProducts() {
-        products.clear();
-        String raw = prefs.getString("products", "");
-        if (!raw.isEmpty()) {
-            try {
-                JSONArray array = new JSONArray(raw);
-                for (int i = 0; i < array.length(); i++) products.add(Product.from(array.getJSONObject(i)));
-            } catch (Exception ignored) {
-                products.clear();
-            }
-        }
-        if (products.isEmpty()) {
-            products.add(new Product("Pan", "Despensa", "ud", "▰", 1));
-            products.add(new Product("Leche", "Frescos", "l", "◖", 2));
-            products.add(new Product("Huevos", "Frescos", "doc", "○", 3));
-            products.add(new Product("Tomates", "Frescos", "ud", "●", 4));
-            products.add(new Product("Platanos", "Fruta", "ud", "◠", 5));
-            products.add(new Product("Manzanas", "Fruta", "kg", "◆", 4));
-            products.add(new Product("Arroz", "Despensa", "kg", "□", 1));
-            products.add(new Product("Pasta", "Despensa", "paq", "≋", 1));
-            products.add(new Product("Cafe", "Desayuno", "paq", "◡", 1));
-            products.add(new Product("Detergente", "Limpieza", "ud", "✦", 2));
-            products.add(new Product("Papel cocina", "Limpieza", "paq", "▣", 0));
-            products.add(new Product("Congelados", "Congelador", "bol", "✳", 2));
-        }
-    }
-
-    private void loadItems() {
-        items.clear();
-        String raw = prefs.getString("items", "");
-        if (!raw.isEmpty()) {
-            try {
-                JSONArray array = new JSONArray(raw);
-                for (int i = 0; i < array.length(); i++) items.add(ShoppingItem.from(array.getJSONObject(i)));
-            } catch (Exception ignored) {
-                items.clear();
-            }
-        }
-        if (items.isEmpty()) {
-            for (String name : Arrays.asList("Pan", "Leche", "Huevos", "Tomates")) {
-                Product product = findProduct(name);
-                if (product != null) items.add(new ShoppingItem(product, name.equals("Huevos") ? 1 : 2, false));
-            }
-        }
-    }
-
-    private void loadPresets() {
-        presets.clear();
-        presets.add(new PresetList("Compra semanal", "▦", Arrays.asList("Pan", "Leche", "Huevos", "Tomates", "Platanos", "Arroz")));
-        presets.add(new PresetList("Desayuno", "☼", Arrays.asList("Pan", "Leche", "Cafe", "Huevos")));
-        presets.add(new PresetList("Limpieza", "✦", Arrays.asList("Detergente", "Papel cocina")));
-        presets.add(new PresetList("Cena rapida", "◷", Arrays.asList("Pasta", "Tomates", "Congelados")));
-    }
-
-    private void loadMembers() {
-        members.clear();
-        String raw = prefs.getString("members", "");
-        if (!raw.isEmpty()) {
-            try {
-                JSONArray array = new JSONArray(raw);
-                for (int i = 0; i < array.length(); i++) members.add(Member.from(array.getJSONObject(i)));
-            } catch (Exception ignored) {
-                members.clear();
-            }
-        }
-        if (members.isEmpty()) {
-            members.add(new Member("Yo", "Puede editar"));
-            members.add(new Member("Casa", "Puede editar"));
-        }
-    }
-
-    private void save() {
-        JSONArray productsJson = new JSONArray();
-        JSONArray itemsJson = new JSONArray();
-        JSONArray membersJson = new JSONArray();
-        try {
-            for (Product product : products) productsJson.put(product.toJson());
-            for (ShoppingItem item : items) itemsJson.put(item.toJson());
-            for (Member member : members) membersJson.put(member.toJson());
-        } catch (Exception ignored) { }
-        prefs.edit()
-            .putString("products", productsJson.toString())
-            .putString("items", itemsJson.toString())
-            .putString("members", membersJson.toString())
-            .putBoolean("canEdit", canEdit)
-            .apply();
+    private String blankTo(String value, String fallback) {
+        String cleaned = value.trim();
+        return cleaned.isEmpty() ? fallback : cleaned;
     }
 
     private View withBottom(View view, int bottom) {
@@ -704,25 +790,20 @@ public class MainActivity extends Activity {
         final String name;
         final String category;
         final String unit;
-        final String icon;
-        final int tint;
+        final String imageName;
+        final String emoji;
 
-        Product(String name, String category, String unit, String icon, int tint) {
-            this.id = UUID.randomUUID().toString();
-            this.name = name;
-            this.category = category;
-            this.unit = unit;
-            this.icon = icon;
-            this.tint = tint;
+        Product(String name, String category, String unit, String imageName, String emoji) {
+            this(UUID.randomUUID().toString(), name, category, unit, imageName, emoji);
         }
 
-        Product(String id, String name, String category, String unit, String icon, int tint) {
+        Product(String id, String name, String category, String unit, String imageName, String emoji) {
             this.id = id;
             this.name = name;
             this.category = category;
             this.unit = unit;
-            this.icon = icon;
-            this.tint = tint;
+            this.imageName = imageName == null || imageName.trim().isEmpty() ? defaultImage(name) : imageName;
+            this.emoji = emoji == null ? "" : emoji;
         }
 
         JSONObject toJson() throws Exception {
@@ -731,8 +812,8 @@ public class MainActivity extends Activity {
             json.put("name", name);
             json.put("category", category);
             json.put("unit", unit);
-            json.put("icon", icon);
-            json.put("tint", tint);
+            json.put("imageName", imageName);
+            json.put("emoji", emoji);
             return json;
         }
 
@@ -742,9 +823,23 @@ public class MainActivity extends Activity {
                 json.optString("name"),
                 json.optString("category", "Otros"),
                 json.optString("unit", "ud"),
-                json.optString("icon", "*"),
-                json.optInt("tint", 0)
+                json.optString("imageName", defaultImage(json.optString("name"))),
+                json.optString("emoji", "")
             );
+        }
+
+        static String defaultImage(String name) {
+            String key = name == null ? "" : name.toLowerCase(Locale.ROOT);
+            if (key.contains("leche")) return "product_milk";
+            if (key.contains("pan")) return "product_bread";
+            if (key.contains("huevo")) return "product_eggs";
+            if (key.contains("tomate")) return "product_tomato";
+            if (key.contains("platano")) return "product_banana";
+            if (key.contains("manzana")) return "product_apple";
+            if (key.contains("detergente")) return "product_detergent";
+            if (key.contains("papel")) return "product_paper";
+            if (key.contains("aceite")) return "product_oil";
+            return "product_default";
         }
     }
 
@@ -755,10 +850,7 @@ public class MainActivity extends Activity {
         boolean checked;
 
         ShoppingItem(Product product, int quantity, boolean checked) {
-            this.id = UUID.randomUUID().toString();
-            this.product = product;
-            this.quantity = quantity;
-            this.checked = checked;
+            this(UUID.randomUUID().toString(), product, quantity, checked);
         }
 
         ShoppingItem(String id, Product product, int quantity, boolean checked) {
@@ -787,15 +879,68 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final class ShoppingList {
+        final String id;
+        final String name;
+        final ArrayList<ShoppingItem> items = new ArrayList<>();
+
+        ShoppingList(String name) {
+            this(UUID.randomUUID().toString(), name);
+        }
+
+        ShoppingList(String id, String name) {
+            this.id = id;
+            this.name = name;
+        }
+
+        JSONObject toJson() throws Exception {
+            JSONObject json = new JSONObject();
+            json.put("id", id);
+            json.put("name", name);
+            JSONArray itemJson = new JSONArray();
+            for (ShoppingItem item : items) itemJson.put(item.toJson());
+            json.put("items", itemJson);
+            return json;
+        }
+
+        static ShoppingList from(JSONObject json) throws Exception {
+            ShoppingList list = new ShoppingList(json.optString("id", UUID.randomUUID().toString()), json.optString("name", "Lista"));
+            JSONArray array = json.optJSONArray("items");
+            if (array != null) {
+                for (int i = 0; i < array.length(); i++) list.items.add(ShoppingItem.from(array.getJSONObject(i)));
+            }
+            return list;
+        }
+    }
+
     private static final class PresetList {
         final String name;
-        final String icon;
+        final String imageName;
         final ArrayList<String> productNames;
 
-        PresetList(String name, String icon, java.util.List<String> productNames) {
+        PresetList(String name, String imageName, java.util.List<String> productNames) {
             this.name = name;
-            this.icon = icon;
+            this.imageName = imageName;
             this.productNames = new ArrayList<>(productNames);
+        }
+
+        JSONObject toJson() throws Exception {
+            JSONObject json = new JSONObject();
+            json.put("name", name);
+            json.put("imageName", imageName);
+            JSONArray names = new JSONArray();
+            for (String productName : productNames) names.put(productName);
+            json.put("productNames", names);
+            return json;
+        }
+
+        static PresetList from(JSONObject json) {
+            ArrayList<String> names = new ArrayList<>();
+            JSONArray array = json.optJSONArray("productNames");
+            if (array != null) {
+                for (int i = 0; i < array.length(); i++) names.add(array.optString(i));
+            }
+            return new PresetList(json.optString("name", "Lista"), json.optString("imageName", "preset_weekly"), names);
         }
     }
 

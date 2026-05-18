@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct ListaCompraApp: App {
@@ -19,15 +20,50 @@ struct Product: Identifiable, Codable, Equatable {
   var category: String
   var unit: String
   var icon: String
+  var assetName: String
+  var emoji: String
   var tint: Int
 
-  init(id: UUID = UUID(), name: String, category: String, unit: String, icon: String, tint: Int) {
+  init(id: UUID = UUID(), name: String, category: String, unit: String, icon: String, assetName: String = "product_default", emoji: String = "", tint: Int) {
     self.id = id
     self.name = name
     self.category = category
     self.unit = unit
     self.icon = icon
+    self.assetName = assetName
+    self.emoji = emoji
     self.tint = tint
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case id, name, category, unit, icon, assetName, emoji, tint
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+    name = try values.decode(String.self, forKey: .name)
+    category = try values.decodeIfPresent(String.self, forKey: .category) ?? "Otros"
+    unit = try values.decodeIfPresent(String.self, forKey: .unit) ?? "ud"
+    icon = try values.decodeIfPresent(String.self, forKey: .icon) ?? "cart"
+    assetName = try values.decodeIfPresent(String.self, forKey: .assetName) ?? Self.defaultAsset(for: name)
+    emoji = try values.decodeIfPresent(String.self, forKey: .emoji) ?? ""
+    tint = try values.decodeIfPresent(Int.self, forKey: .tint) ?? 0
+  }
+
+  static func defaultAsset(for name: String) -> String {
+    switch name.lowercased() {
+    case "leche": return "product_milk"
+    case "pan": return "product_bread"
+    case "huevos": return "product_eggs"
+    case "tomates": return "product_tomato"
+    case "platanos": return "product_banana"
+    case "manzanas": return "product_apple"
+    case "detergente": return "product_detergent"
+    case "papel cocina", "papel higienico": return "product_paper"
+    case "aceite", "aceite de oliva": return "product_oil"
+    default: return "product_default"
+    }
   }
 }
 
@@ -45,17 +81,46 @@ struct ShoppingItem: Identifiable, Codable, Equatable {
   }
 }
 
+struct ShoppingList: Identifiable, Codable, Equatable {
+  let id: UUID
+  var name: String
+  var items: [ShoppingItem]
+  var isShared: Bool
+
+  init(id: UUID = UUID(), name: String, items: [ShoppingItem] = [], isShared: Bool = true) {
+    self.id = id
+    self.name = name
+    self.items = items
+    self.isShared = isShared
+  }
+}
+
 struct PresetList: Identifiable, Codable, Equatable {
   let id: UUID
   var name: String
   var icon: String
+  var assetName: String
   var productNames: [String]
 
-  init(id: UUID = UUID(), name: String, icon: String, productNames: [String]) {
+  init(id: UUID = UUID(), name: String, icon: String, assetName: String = "preset_weekly", productNames: [String]) {
     self.id = id
     self.name = name
     self.icon = icon
+    self.assetName = assetName
     self.productNames = productNames
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case id, name, icon, assetName, productNames
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+    name = try values.decode(String.self, forKey: .name)
+    icon = try values.decodeIfPresent(String.self, forKey: .icon) ?? "star"
+    assetName = try values.decodeIfPresent(String.self, forKey: .assetName) ?? "preset_weekly"
+    productNames = try values.decodeIfPresent([String].self, forKey: .productNames) ?? []
   }
 }
 
@@ -72,14 +137,17 @@ struct SharedMember: Identifiable, Codable, Equatable {
 }
 
 final class ShoppingStore: ObservableObject {
-  @Published var items: [ShoppingItem] = [] { didSet { save() } }
+  @Published var lists: [ShoppingList] = [] { didSet { save() } }
+  @Published var activeListID: UUID? { didSet { save() } }
   @Published var products: [Product] = [] { didSet { save() } }
   @Published var presets: [PresetList] = [] { didSet { save() } }
   @Published var members: [SharedMember] = [] { didSet { save() } }
   @Published var canEditSharedList = true { didSet { save() } }
 
   private var isLoading = true
-  private let itemsKey = "shopping.items.v1"
+  private let listsKey = "shopping.lists.v2"
+  private let activeListKey = "shopping.activeList.v2"
+  private let legacyItemsKey = "shopping.items.v1"
   private let productsKey = "shopping.products.v1"
   private let presetsKey = "shopping.presets.v1"
   private let membersKey = "shopping.members.v1"
@@ -90,51 +158,84 @@ final class ShoppingStore: ObservableObject {
     isLoading = false
   }
 
+  var activeList: ShoppingList {
+    lists.first(where: { $0.id == activeListID }) ?? lists.first ?? ShoppingList(name: "Lista de la compra")
+  }
+
+  var items: [ShoppingItem] { activeList.items }
   var pendingItems: [ShoppingItem] { items.filter { !$0.checked } }
   var doneItems: [ShoppingItem] { items.filter { $0.checked } }
 
   var shareText: String {
     let lines = items.map { "- \($0.product.name): \($0.quantity) \($0.product.unit)\($0.checked ? " (comprado)" : "")" }
-    return "Lista de la compra\n" + lines.joined(separator: "\n")
+    return "\(activeList.name)\n" + lines.joined(separator: "\n")
+  }
+
+  private var activeIndex: Int? {
+    lists.firstIndex { $0.id == activeListID } ?? lists.indices.first
   }
 
   func add(product: Product, quantity: Int) {
+    guard let listIndex = activeIndex else { return }
     let safeQuantity = max(1, quantity)
-    if let index = items.firstIndex(where: { $0.product.name == product.name && !$0.checked }) {
-      items[index].quantity += safeQuantity
+    if let itemIndex = lists[listIndex].items.firstIndex(where: { $0.product.name == product.name && !$0.checked }) {
+      lists[listIndex].items[itemIndex].quantity += safeQuantity
     } else {
-      items.insert(ShoppingItem(product: product, quantity: safeQuantity), at: 0)
+      lists[listIndex].items.insert(ShoppingItem(product: product, quantity: safeQuantity), at: 0)
     }
   }
 
-  func addCustomProduct(name: String, category: String) {
+  func addCustomProduct(name: String, category: String, unit: String, emoji: String, assetName: String) {
     let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !cleaned.isEmpty else { return }
     if products.contains(where: { $0.name.localizedCaseInsensitiveCompare(cleaned) == .orderedSame }) { return }
-    products.append(Product(name: cleaned, category: category.isEmpty ? "Otros" : category, unit: "ud", icon: "cart", tint: products.count % 6))
+    let safeUnit = unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "ud" : unit
+    products.append(Product(name: cleaned, category: category.isEmpty ? "Otros" : category, unit: safeUnit, icon: "cart", assetName: assetName, emoji: emoji, tint: products.count % 6))
   }
 
   func toggle(_ item: ShoppingItem) {
-    guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-    items[index].checked.toggle()
+    guard let listIndex = activeIndex, let itemIndex = lists[listIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
+    lists[listIndex].items[itemIndex].checked.toggle()
   }
 
   func increment(_ item: ShoppingItem) {
-    guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-    items[index].quantity += 1
+    guard let listIndex = activeIndex, let itemIndex = lists[listIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
+    lists[listIndex].items[itemIndex].quantity += 1
   }
 
   func decrement(_ item: ShoppingItem) {
-    guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-    items[index].quantity = max(1, items[index].quantity - 1)
+    guard let listIndex = activeIndex, let itemIndex = lists[listIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
+    lists[listIndex].items[itemIndex].quantity = max(1, lists[listIndex].items[itemIndex].quantity - 1)
   }
 
   func delete(_ item: ShoppingItem) {
-    items.removeAll { $0.id == item.id }
+    guard let listIndex = activeIndex else { return }
+    lists[listIndex].items.removeAll { $0.id == item.id }
   }
 
   func clearChecked() {
-    items.removeAll { $0.checked }
+    guard let listIndex = activeIndex else { return }
+    lists[listIndex].items.removeAll { $0.checked }
+  }
+
+  func createList(name: String) {
+    let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !cleaned.isEmpty else { return }
+    let list = ShoppingList(name: cleaned)
+    lists.append(list)
+    activeListID = list.id
+  }
+
+  func selectList(_ list: ShoppingList) {
+    activeListID = list.id
+  }
+
+  func deleteList(_ list: ShoppingList) {
+    guard lists.count > 1 else { return }
+    lists.removeAll { $0.id == list.id }
+    if activeListID == list.id {
+      activeListID = lists.first?.id
+    }
   }
 
   func usePreset(_ preset: PresetList) {
@@ -143,6 +244,13 @@ final class ShoppingStore: ObservableObject {
         add(product: product, quantity: 1)
       }
     }
+  }
+
+  func addPreset(name: String) {
+    let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !cleaned.isEmpty else { return }
+    let names = items.map { $0.product.name }
+    presets.append(PresetList(name: cleaned, icon: "star", assetName: "preset_weekly", productNames: names))
   }
 
   func addMember(_ name: String) {
@@ -157,7 +265,17 @@ final class ShoppingStore: ObservableObject {
 
   private func load() {
     products = decode([Product].self, key: productsKey) ?? Self.defaultProducts
-    items = decode([ShoppingItem].self, key: itemsKey) ?? Self.defaultItems(from: products)
+    if let decodedLists = decode([ShoppingList].self, key: listsKey), !decodedLists.isEmpty {
+      lists = decodedLists
+    } else {
+      let legacyItems = decode([ShoppingItem].self, key: legacyItemsKey) ?? Self.defaultItems(from: products)
+      lists = [ShoppingList(name: "Lista de la compra", items: legacyItems)]
+    }
+    if let rawActive = UserDefaults.standard.string(forKey: activeListKey), let id = UUID(uuidString: rawActive), lists.contains(where: { $0.id == id }) {
+      activeListID = id
+    } else {
+      activeListID = lists.first?.id
+    }
     presets = decode([PresetList].self, key: presetsKey) ?? Self.defaultPresets
     members = decode([SharedMember].self, key: membersKey) ?? [SharedMember(name: "Yo"), SharedMember(name: "Casa")]
     canEditSharedList = UserDefaults.standard.object(forKey: editKey) as? Bool ?? true
@@ -166,7 +284,10 @@ final class ShoppingStore: ObservableObject {
   private func save() {
     guard !isLoading else { return }
     encode(products, key: productsKey)
-    encode(items, key: itemsKey)
+    encode(lists, key: listsKey)
+    if let activeListID {
+      UserDefaults.standard.set(activeListID.uuidString, forKey: activeListKey)
+    }
     encode(presets, key: presetsKey)
     encode(members, key: membersKey)
     UserDefaults.standard.set(canEditSharedList, forKey: editKey)
@@ -184,18 +305,15 @@ final class ShoppingStore: ObservableObject {
   }
 
   static let defaultProducts: [Product] = [
-    Product(name: "Pan", category: "Despensa", unit: "ud", icon: "baguette", tint: 1),
-    Product(name: "Leche", category: "Frescos", unit: "l", icon: "drop", tint: 2),
-    Product(name: "Huevos", category: "Frescos", unit: "doc", icon: "circle.grid.cross", tint: 3),
-    Product(name: "Tomates", category: "Frescos", unit: "ud", icon: "circle.fill", tint: 4),
-    Product(name: "Platanos", category: "Fruta", unit: "ud", icon: "leaf", tint: 5),
-    Product(name: "Manzanas", category: "Fruta", unit: "kg", icon: "apple.logo", tint: 4),
-    Product(name: "Arroz", category: "Despensa", unit: "kg", icon: "shippingbox", tint: 1),
-    Product(name: "Pasta", category: "Despensa", unit: "paq", icon: "takeoutbag.and.cup.and.straw", tint: 1),
-    Product(name: "Cafe", category: "Desayuno", unit: "paq", icon: "cup.and.saucer", tint: 1),
-    Product(name: "Detergente", category: "Limpieza", unit: "ud", icon: "bubbles.and.sparkles", tint: 2),
-    Product(name: "Papel cocina", category: "Limpieza", unit: "paq", icon: "square.stack.3d.up", tint: 0),
-    Product(name: "Congelados", category: "Congelador", unit: "bol", icon: "snowflake", tint: 2)
+    Product(name: "Leche", category: "Lacteos", unit: "l", icon: "drop", assetName: "product_milk", tint: 2),
+    Product(name: "Pan", category: "Panaderia", unit: "ud", icon: "baguette", assetName: "product_bread", tint: 1),
+    Product(name: "Huevos", category: "Lacteos", unit: "uds", icon: "circle.grid.cross", assetName: "product_eggs", tint: 3),
+    Product(name: "Tomates", category: "Frescos", unit: "g", icon: "circle.fill", assetName: "product_tomato", tint: 4),
+    Product(name: "Platanos", category: "Fruta", unit: "kg", icon: "leaf", assetName: "product_banana", tint: 5),
+    Product(name: "Manzanas", category: "Fruta", unit: "kg", icon: "apple.logo", assetName: "product_apple", tint: 4),
+    Product(name: "Detergente", category: "Limpieza", unit: "ud", icon: "bubbles.and.sparkles", assetName: "product_detergent", tint: 2),
+    Product(name: "Papel higienico", category: "Limpieza", unit: "uds", icon: "square.stack.3d.up", assetName: "product_paper", tint: 0),
+    Product(name: "Aceite de oliva", category: "Despensa", unit: "ud", icon: "drop.fill", assetName: "product_oil", tint: 1)
   ]
 
   static func defaultItems(from products: [Product]) -> [ShoppingItem] {
@@ -205,10 +323,10 @@ final class ShoppingStore: ObservableObject {
   }
 
   static let defaultPresets: [PresetList] = [
-    PresetList(name: "Compra semanal", icon: "calendar", productNames: ["Pan", "Leche", "Huevos", "Tomates", "Platanos", "Arroz"]),
-    PresetList(name: "Desayuno", icon: "sun.max", productNames: ["Pan", "Leche", "Cafe", "Huevos"]),
-    PresetList(name: "Limpieza", icon: "sparkles", productNames: ["Detergente", "Papel cocina"]),
-    PresetList(name: "Cena rapida", icon: "fork.knife", productNames: ["Pasta", "Tomates", "Congelados"])
+    PresetList(name: "Compra semanal", icon: "calendar", assetName: "preset_weekly", productNames: ["Pan", "Leche", "Huevos", "Tomates", "Platanos", "Detergente"]),
+    PresetList(name: "Desayuno", icon: "sun.max", assetName: "preset_breakfast", productNames: ["Pan", "Leche", "Huevos"]),
+    PresetList(name: "Limpieza", icon: "sparkles", assetName: "preset_cleaning", productNames: ["Detergente", "Papel higienico"]),
+    PresetList(name: "Cena rapida", icon: "fork.knife", assetName: "preset_dinner", productNames: ["Aceite de oliva", "Tomates", "Pan"])
   ]
 }
 
@@ -217,8 +335,9 @@ struct RootView: View {
     TabView {
       ListScreen().tabItem { Label("Lista", systemImage: "checklist") }
       AddScreen().tabItem { Label("Anadir", systemImage: "plus.circle") }
-      PresetsScreen().tabItem { Label("Listas", systemImage: "rectangle.grid.2x2") }
+      PresetsScreen().tabItem { Label("Predeterminadas", systemImage: "star") }
       ShareScreen().tabItem { Label("Compartir", systemImage: "person.2") }
+      MoreScreen().tabItem { Label("Mas", systemImage: "ellipsis") }
     }
     .tint(AppColors.accent)
   }
@@ -235,6 +354,7 @@ struct ListScreen: View {
           HStack(spacing: 10) {
             Chip(text: "Compartida", icon: "person.2.fill")
             Chip(text: "\(store.members.count) personas", icon: "link")
+            Chip(text: store.activeList.name, icon: "list.bullet")
           }
           SummaryPanel()
           ItemSection(title: "Por comprar", items: store.pendingItems)
@@ -266,6 +386,9 @@ struct AddScreen: View {
   @State private var quantity = 1
   @State private var customName = ""
   @State private var customCategory = "Otros"
+  @State private var customUnit = "ud"
+  @State private var customEmoji = ""
+  @State private var customAsset = "product_default"
 
   private var filtered: [Product] {
     store.products.filter { product in
@@ -294,9 +417,15 @@ struct AddScreen: View {
               .textFieldStyle(AppTextFieldStyle())
             TextField("Categoria", text: $customCategory)
               .textFieldStyle(AppTextFieldStyle())
+            TextField("Unidad", text: $customUnit)
+              .textFieldStyle(AppTextFieldStyle())
+            TextField("Emoji opcional", text: $customEmoji)
+              .textFieldStyle(AppTextFieldStyle())
+            AssetPicker(selection: $customAsset)
             Button {
-              store.addCustomProduct(name: customName, category: customCategory)
+              store.addCustomProduct(name: customName, category: customCategory, unit: customUnit, emoji: customEmoji, assetName: customAsset)
               customName = ""
+              customEmoji = ""
             } label: {
               Label("Guardar producto", systemImage: "plus")
                 .frame(maxWidth: .infinity)
@@ -313,12 +442,29 @@ struct AddScreen: View {
 
 struct PresetsScreen: View {
   @EnvironmentObject private var store: ShoppingStore
+  @State private var newPresetName = ""
 
   var body: some View {
     NavigationStack {
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
           Header(title: "Listas base", subtitle: "Plantillas personales para repetir compras.")
+          Panel {
+            Text("Crear desde la lista actual")
+              .font(.system(size: 18, weight: .bold))
+              .foregroundStyle(AppColors.text)
+            TextField("Nombre de la lista", text: $newPresetName)
+              .textFieldStyle(AppTextFieldStyle())
+            Button {
+              store.addPreset(name: newPresetName)
+              newPresetName = ""
+            } label: {
+              Label("Guardar predeterminada", systemImage: "plus")
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(store.items.isEmpty)
+          }
           ForEach(store.presets) { preset in
             PresetCard(preset: preset)
           }
@@ -341,9 +487,15 @@ struct ShareScreen: View {
           Header(title: "Compartida", subtitle: "Gestiona personas y envia la lista.")
           Panel {
             HStack {
-              Label("\(store.members.count) personas", systemImage: "person.2.fill")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(AppColors.text)
+              ResourceIcon(name: "app_group", size: 48)
+              VStack(alignment: .leading, spacing: 3) {
+                Text(store.activeList.name)
+                  .font(.system(size: 18, weight: .bold))
+                  .foregroundStyle(AppColors.text)
+                Text("\(store.members.count) personas")
+                  .font(.system(size: 13, weight: .medium))
+                  .foregroundStyle(AppColors.muted)
+              }
               Spacer()
               ShareLink(item: store.shareText) {
                 Label("Enviar", systemImage: "square.and.arrow.up")
@@ -407,6 +559,63 @@ struct ShareScreen: View {
 
   private func initials(_ value: String) -> String {
     value.split(separator: " ").prefix(2).compactMap { $0.first }.map(String.init).joined().uppercased()
+  }
+}
+
+struct MoreScreen: View {
+  @EnvironmentObject private var store: ShoppingStore
+  @State private var listName = ""
+
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          Header(title: "Mas", subtitle: "Crea listas y cambia la lista activa.")
+          Panel {
+            Text("Nueva lista")
+              .font(.system(size: 18, weight: .bold))
+              .foregroundStyle(AppColors.text)
+            TextField("Nombre", text: $listName)
+              .textFieldStyle(AppTextFieldStyle())
+            Button {
+              store.createList(name: listName)
+              listName = ""
+            } label: {
+              Label("Crear lista", systemImage: "plus")
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryButtonStyle())
+          }
+          ForEach(store.lists) { list in
+            HStack(spacing: 12) {
+              Image(systemName: store.activeListID == list.id ? "checkmark.circle.fill" : "list.bullet")
+                .foregroundStyle(store.activeListID == list.id ? AppColors.accent : AppColors.muted)
+                .font(.system(size: 22, weight: .bold))
+              VStack(alignment: .leading, spacing: 3) {
+                Text(list.name)
+                  .font(.system(size: 17, weight: .bold))
+                  .foregroundStyle(AppColors.text)
+                Text("\(list.items.count) productos")
+                  .font(.system(size: 13, weight: .medium))
+                  .foregroundStyle(AppColors.muted)
+              }
+              Spacer()
+              Button("Usar") { store.selectList(list) }
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(AppColors.accent)
+              Button(role: .destructive) { store.deleteList(list) } label: {
+                Image(systemName: "trash")
+              }
+              .disabled(store.lists.count <= 1)
+            }
+            .padding(12)
+            .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
+          }
+        }
+        .padding(20)
+      }
+      .background(AppColors.background.ignoresSafeArea())
+    }
   }
 }
 
@@ -548,11 +757,7 @@ struct PresetCard: View {
   var body: some View {
     Panel {
       HStack(alignment: .top, spacing: 12) {
-        Image(systemName: preset.icon)
-          .font(.system(size: 20, weight: .bold))
-          .foregroundStyle(AppColors.accent)
-          .frame(width: 44, height: 44)
-          .background(AppColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+        ResourceIcon(name: preset.assetName, size: 64)
         VStack(alignment: .leading, spacing: 6) {
           Text(preset.name)
             .font(.system(size: 19, weight: .bold))
@@ -609,11 +814,72 @@ struct ProductIcon: View {
   let size: CGFloat
 
   var body: some View {
-    Image(systemName: product.icon)
-      .font(.system(size: size * 0.42, weight: .bold))
-      .foregroundStyle(iconColor(product.tint))
-      .frame(width: size, height: size)
-      .background(iconColor(product.tint).opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
+    if !product.emoji.isEmpty {
+      Text(String(product.emoji.prefix(2)))
+        .font(.system(size: size * 0.46, weight: .bold))
+        .frame(width: size, height: size)
+        .background(iconColor(product.tint).opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+    } else {
+      ResourceIcon(name: product.assetName, size: size)
+    }
+  }
+}
+
+struct ResourceIcon: View {
+  let name: String
+  let size: CGFloat
+
+  var body: some View {
+    Group {
+      if let image = UIImage(named: name) {
+        Image(uiImage: image)
+          .resizable()
+      } else if let url = Bundle.main.url(forResource: name, withExtension: "png"),
+                let image = UIImage(contentsOfFile: url.path) {
+        Image(uiImage: image)
+          .resizable()
+      } else {
+        Image(systemName: "cart")
+          .resizable()
+          .scaledToFit()
+          .padding(size * 0.28)
+          .foregroundStyle(AppColors.accent)
+          .background(AppColors.accent.opacity(0.16))
+      }
+    }
+    .scaledToFit()
+    .frame(width: size, height: size)
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+  }
+}
+
+struct AssetPicker: View {
+  @Binding var selection: String
+
+  private let assets = ["product_default", "product_milk", "product_bread", "product_eggs", "product_tomato", "product_banana", "product_apple", "product_detergent", "product_paper", "product_oil"]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Imagen")
+        .font(.system(size: 13, weight: .bold))
+        .foregroundStyle(AppColors.muted)
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 10) {
+          ForEach(assets, id: \.self) { asset in
+            Button {
+              selection = asset
+            } label: {
+              ResourceIcon(name: asset, size: 44)
+                .overlay(
+                  RoundedRectangle(cornerRadius: 8)
+                    .stroke(selection == asset ? AppColors.accent : Color.clear, lineWidth: 3)
+                )
+            }
+            .buttonStyle(.plain)
+          }
+        }
+      }
+    }
   }
 }
 
