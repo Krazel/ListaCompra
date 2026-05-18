@@ -36,9 +36,9 @@ jobs:
           fi
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -qry ListaCompra-iPhone-v1.1-build-${{ github.run_number }}.ipa Payload
+          zip -qry ListaCompra-iPhone-v1.2-build-${{ github.run_number }}.ipa Payload
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ListaCompra-iPhone-v1.1-build-${{ github.run_number }}
-          path: native-ios/ListaCompra-iPhone-v1.1-build-${{ github.run_number }}.ipa
+          name: ListaCompra-iPhone-v1.2-build-${{ github.run_number }}
+          path: native-ios/ListaCompra-iPhone-v1.2-build-${{ github.run_number }}.ipa

@@ -224,6 +224,34 @@ final class ShoppingStore: ObservableObject {
     products.append(Product(name: cleaned, category: category.isEmpty ? "Otros" : category, unit: safeUnit, icon: "cart", assetName: assetName, emoji: emoji, tint: products.count % 6))
   }
 
+  func upsertProduct(name: String, category: String = "Importados", unit: String = "ud") -> Product {
+    let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let existing = products.first(where: { $0.name.localizedCaseInsensitiveCompare(cleaned) == .orderedSame }) {
+      return existing
+    }
+    let product = Product(name: cleaned, category: category, unit: unit, icon: "cart", assetName: Product.defaultAsset(for: cleaned), tint: products.count % 6)
+    products.append(product)
+    return product
+  }
+
+  func importText(_ text: String, addMissingProducts: Bool) {
+    let names = text
+      .components(separatedBy: CharacterSet(charactersIn: ",\n;"))
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+    for name in names {
+      if let product = products.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+        add(product: product, quantity: 1)
+      } else if addMissingProducts {
+        add(product: upsertProduct(name: name), quantity: 1)
+      }
+    }
+  }
+
+  var categories: [String] {
+    Array(Set(products.map { $0.category })).sorted()
+  }
+
   func toggle(_ item: ShoppingItem) {
     guard let listIndex = activeIndex, let itemIndex = lists[listIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
     lists[listIndex].items[itemIndex].checked.toggle()
@@ -282,6 +310,16 @@ final class ShoppingStore: ObservableObject {
     guard !cleaned.isEmpty else { return }
     let names = items.map { $0.product.name }
     presets.append(PresetList(name: cleaned, icon: "star", assetName: "preset_weekly", productNames: names))
+  }
+
+  func updatePreset(_ preset: PresetList, name: String, productNames: [String]) {
+    guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
+    presets[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? preset.name : name
+    presets[index].productNames = productNames
+  }
+
+  func deletePreset(_ preset: PresetList) {
+    presets.removeAll { $0.id == preset.id }
   }
 
   func addMember(_ name: String) {
@@ -344,7 +382,13 @@ final class ShoppingStore: ObservableObject {
     Product(name: "Manzanas", category: "Fruta", unit: "kg", icon: "apple.logo", assetName: "product_apple", tint: 4),
     Product(name: "Detergente", category: "Limpieza", unit: "ud", icon: "bubbles.and.sparkles", assetName: "product_detergent", tint: 2),
     Product(name: "Papel higienico", category: "Limpieza", unit: "uds", icon: "square.stack.3d.up", assetName: "product_paper", tint: 0),
-    Product(name: "Aceite de oliva", category: "Despensa", unit: "ud", icon: "drop.fill", assetName: "product_oil", tint: 1)
+    Product(name: "Aceite de oliva", category: "Despensa", unit: "ud", icon: "drop.fill", assetName: "product_oil", tint: 1),
+    Product(name: "Arroz", category: "Despensa", unit: "kg", icon: "shippingbox", assetName: "product_rice", tint: 1),
+    Product(name: "Pasta", category: "Despensa", unit: "paq", icon: "takeoutbag.and.cup.and.straw", assetName: "product_pasta", tint: 1),
+    Product(name: "Cafe", category: "Desayuno", unit: "paq", icon: "cup.and.saucer", assetName: "product_coffee", tint: 1),
+    Product(name: "Congelados", category: "Congelador", unit: "bol", icon: "snowflake", assetName: "product_frozen", tint: 2),
+    Product(name: "Queso", category: "Lacteos", unit: "ud", icon: "triangle", assetName: "product_cheese", tint: 3),
+    Product(name: "Agua", category: "Bebidas", unit: "l", icon: "waterbottle", assetName: "product_water", tint: 2)
   ]
 
   static func defaultItems(from products: [Product]) -> [ShoppingItem] {
@@ -368,7 +412,6 @@ struct RootView: View {
       AddScreen().tabItem { Label("Anadir", systemImage: "plus.circle") }
       PresetsScreen().tabItem { Label("Predeterminadas", systemImage: "star") }
       ShareScreen().tabItem { Label("Compartir", systemImage: "person.2") }
-      MoreScreen().tabItem { Label("Mas", systemImage: "ellipsis") }
     }
     .tint(AppColors.accent)
   }
@@ -376,18 +419,31 @@ struct RootView: View {
 
 struct ListScreen: View {
   @EnvironmentObject private var store: ShoppingStore
+  @State private var showingListInfo = false
+  @State private var showingBulkImport = false
 
   var body: some View {
     NavigationStack {
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
-          Header(title: "Lista de la compra", subtitle: "\(store.pendingItems.count) pendientes")
-          HStack(spacing: 10) {
-            Chip(text: "Compartida", icon: "person.2.fill")
-            Chip(text: "\(store.members.count) personas", icon: "link")
-            Chip(text: store.activeList.name, icon: "list.bullet")
+          HStack(alignment: .top) {
+            Header(title: store.activeList.name, subtitle: "Lista de la compra")
+            Spacer()
+            Button { showingListInfo = true } label: {
+              Image(systemName: "info.circle")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(AppColors.accent)
+            }
           }
+          ListSwitcher()
           SummaryPanel()
+          Button {
+            showingBulkImport = true
+          } label: {
+            Label("Pegar lista rapida", systemImage: "doc.on.clipboard")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(PrimaryButtonStyle())
           ItemSection(title: "Por comprar", items: store.pendingItems)
           if !store.doneItems.isEmpty {
             HStack {
@@ -407,12 +463,21 @@ struct ListScreen: View {
         .padding(20)
       }
       .background(AppColors.background.ignoresSafeArea())
+      .sheet(isPresented: $showingListInfo) {
+        ListInfoSheet()
+          .environmentObject(store)
+      }
+      .sheet(isPresented: $showingBulkImport) {
+        BulkImportSheet()
+          .environmentObject(store)
+      }
     }
   }
 }
 
 struct AddScreen: View {
   @EnvironmentObject private var store: ShoppingStore
+  @FocusState private var fieldFocused: Bool
   @State private var query = ""
   @State private var quantity = 1
   @State private var customName = ""
@@ -420,6 +485,7 @@ struct AddScreen: View {
   @State private var customUnit = "ud"
   @State private var customEmoji = ""
   @State private var customAsset = "product_default"
+  @State private var imageMode = "Galeria"
 
   private var filtered: [Product] {
     store.products.filter { product in
@@ -446,13 +512,30 @@ struct AddScreen: View {
               .foregroundStyle(AppColors.text)
             TextField("Nombre", text: $customName)
               .textFieldStyle(AppTextFieldStyle())
-            TextField("Categoria", text: $customCategory)
-              .textFieldStyle(AppTextFieldStyle())
+              .focused($fieldFocused)
+            CategorySelector(selection: $customCategory)
+              .environmentObject(store)
             TextField("Unidad", text: $customUnit)
               .textFieldStyle(AppTextFieldStyle())
-            TextField("Emoji opcional", text: $customEmoji)
-              .textFieldStyle(AppTextFieldStyle())
-            AssetPicker(selection: $customAsset)
+              .focused($fieldFocused)
+            Picker("Imagen", selection: $imageMode) {
+              Text("Galeria").tag("Galeria")
+              Text("Emoji").tag("Emoji")
+              Text("Foto").tag("Foto")
+            }
+            .pickerStyle(.segmented)
+            if imageMode == "Emoji" {
+              TextField("Emoji para la imagen", text: $customEmoji)
+                .textFieldStyle(AppTextFieldStyle())
+                .focused($fieldFocused)
+            } else {
+              AssetPicker(selection: $customAsset)
+              if imageMode == "Foto" {
+                Text("La camara/imagen propia necesita selector nativo. De momento guarda el producto con una imagen de la app o emoji.")
+                  .font(.system(size: 12, weight: .medium))
+                  .foregroundStyle(AppColors.muted)
+              }
+            }
             Button {
               store.addCustomProduct(name: customName, category: customCategory, unit: customUnit, emoji: customEmoji, assetName: customAsset)
               customName = ""
@@ -466,6 +549,8 @@ struct AddScreen: View {
         }
         .padding(20)
       }
+      .scrollDismissesKeyboard(.interactively)
+      .simultaneousGesture(TapGesture().onEnded { fieldFocused = false })
       .background(AppColors.background.ignoresSafeArea())
     }
   }
@@ -474,6 +559,7 @@ struct AddScreen: View {
 struct PresetsScreen: View {
   @EnvironmentObject private var store: ShoppingStore
   @State private var newPresetName = ""
+  @State private var editingPreset: PresetList?
 
   var body: some View {
     NavigationStack {
@@ -497,12 +583,21 @@ struct PresetsScreen: View {
             .disabled(store.items.isEmpty)
           }
           ForEach(store.presets) { preset in
-            PresetCard(preset: preset)
+            Button {
+              editingPreset = preset
+            } label: {
+              PresetCard(preset: preset)
+            }
+            .buttonStyle(.plain)
           }
         }
         .padding(20)
       }
       .background(AppColors.background.ignoresSafeArea())
+      .sheet(item: $editingPreset) { preset in
+        PresetEditorSheet(preset: preset)
+          .environmentObject(store)
+      }
     }
   }
 }
@@ -658,6 +753,246 @@ struct SummaryPanel: View {
       Metric(title: "Total", value: "\(store.items.count)")
       Metric(title: "Pendiente", value: "\(store.pendingItems.count)")
       Metric(title: "Hecho", value: "\(store.doneItems.count)")
+    }
+  }
+}
+
+struct ListSwitcher: View {
+  @EnvironmentObject private var store: ShoppingStore
+  @State private var newListName = ""
+
+  var body: some View {
+    Panel {
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 10) {
+          ForEach(store.lists) { list in
+            Button {
+              store.selectList(list)
+            } label: {
+              Text(list.name)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(store.activeListID == list.id ? .white : AppColors.accent)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(store.activeListID == list.id ? AppColors.accent : AppColors.accent.opacity(0.14), in: Capsule())
+            }
+            .buttonStyle(.plain)
+          }
+        }
+      }
+      HStack {
+        TextField("Nueva lista", text: $newListName)
+          .textFieldStyle(AppTextFieldStyle())
+        Button {
+          store.createList(name: newListName)
+          newListName = ""
+        } label: {
+          Image(systemName: "plus")
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(PrimaryButtonStyle())
+      }
+    }
+  }
+}
+
+struct ListInfoSheet: View {
+  @EnvironmentObject private var store: ShoppingStore
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          Header(title: store.activeList.name, subtitle: "Informacion de la lista")
+          Panel {
+            Text("Esta version permite compartir la lista como texto. No sincroniza en tiempo real entre moviles todavia.")
+              .font(.system(size: 14, weight: .medium))
+              .foregroundStyle(AppColors.muted)
+            Text("Productos: \(store.items.count)")
+              .foregroundStyle(AppColors.text)
+            Text("Pendientes: \(store.pendingItems.count)")
+              .foregroundStyle(AppColors.text)
+          }
+        }
+        .padding(20)
+      }
+      .background(AppColors.background.ignoresSafeArea())
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Cerrar") { dismiss() }
+        }
+      }
+    }
+  }
+}
+
+struct BulkImportSheet: View {
+  @EnvironmentObject private var store: ShoppingStore
+  @Environment(\.dismiss) private var dismiss
+  @FocusState private var focused: Bool
+  @State private var text = ""
+  @State private var addMissing = true
+
+  var body: some View {
+    NavigationStack {
+      VStack(alignment: .leading, spacing: 14) {
+        Header(title: "Pegar lista", subtitle: "Separa productos por coma o linea.")
+        Toggle("Anadir productos nuevos al catalogo", isOn: $addMissing)
+          .tint(AppColors.accent)
+          .foregroundStyle(AppColors.text)
+        TextEditor(text: $text)
+          .focused($focused)
+          .font(.system(size: 16, weight: .medium))
+          .foregroundStyle(AppColors.text)
+          .scrollContentBackground(.hidden)
+          .padding(12)
+          .frame(minHeight: 220)
+          .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
+        Button {
+          store.importText(text, addMissingProducts: addMissing)
+          dismiss()
+        } label: {
+          Label("Anadir a la lista", systemImage: "plus")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(PrimaryButtonStyle())
+        Spacer()
+      }
+      .padding(20)
+      .background(AppColors.background.ignoresSafeArea())
+      .scrollDismissesKeyboard(.interactively)
+      .simultaneousGesture(TapGesture().onEnded { focused = false })
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancelar") { dismiss() }
+        }
+      }
+    }
+  }
+}
+
+struct CategorySelector: View {
+  @EnvironmentObject private var store: ShoppingStore
+  @Binding var selection: String
+  @State private var customCategory = ""
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Categoria")
+        .font(.system(size: 13, weight: .bold))
+        .foregroundStyle(AppColors.muted)
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 8) {
+          ForEach(store.categories, id: \.self) { category in
+            Button {
+              selection = category
+            } label: {
+              Text(category)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(selection == category ? .white : AppColors.accent)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(selection == category ? AppColors.accent : AppColors.accent.opacity(0.14), in: Capsule())
+            }
+            .buttonStyle(.plain)
+          }
+        }
+      }
+      HStack {
+        TextField("Nueva categoria", text: $customCategory)
+          .textFieldStyle(AppTextFieldStyle())
+        Button {
+          let cleaned = customCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+          if !cleaned.isEmpty {
+            selection = cleaned
+            customCategory = ""
+          }
+        } label: {
+          Image(systemName: "plus")
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(PrimaryButtonStyle())
+      }
+    }
+  }
+}
+
+struct PresetEditorSheet: View {
+  @EnvironmentObject private var store: ShoppingStore
+  @Environment(\.dismiss) private var dismiss
+  let preset: PresetList
+  @State private var name: String
+  @State private var productNames: [String]
+  @State private var addName = ""
+
+  init(preset: PresetList) {
+    self.preset = preset
+    _name = State(initialValue: preset.name)
+    _productNames = State(initialValue: preset.productNames)
+  }
+
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          Header(title: "Editar lista base", subtitle: preset.name)
+          TextField("Nombre", text: $name)
+            .textFieldStyle(AppTextFieldStyle())
+          Panel {
+            Text("Productos")
+              .font(.system(size: 18, weight: .bold))
+              .foregroundStyle(AppColors.text)
+            ForEach(productNames, id: \.self) { productName in
+              HStack {
+                Text(productName)
+                  .foregroundStyle(AppColors.text)
+                Spacer()
+                Button(role: .destructive) {
+                  productNames.removeAll { $0 == productName }
+                } label: {
+                  Image(systemName: "trash")
+                }
+              }
+            }
+            TextField("Anadir producto", text: $addName)
+              .textFieldStyle(AppTextFieldStyle())
+            Button {
+              let cleaned = addName.trimmingCharacters(in: .whitespacesAndNewlines)
+              if !cleaned.isEmpty {
+                productNames.append(cleaned)
+                _ = store.upsertProduct(name: cleaned)
+                addName = ""
+              }
+            } label: {
+              Label("Anadir", systemImage: "plus")
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryButtonStyle())
+          }
+          Button(role: .destructive) {
+            store.deletePreset(preset)
+            dismiss()
+          } label: {
+            Label("Borrar lista base", systemImage: "trash")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(PrimaryButtonStyle())
+        }
+        .padding(20)
+      }
+      .background(AppColors.background.ignoresSafeArea())
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancelar") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Guardar") {
+            store.updatePreset(preset, name: name, productNames: productNames)
+            dismiss()
+          }
+        }
+      }
     }
   }
 }
