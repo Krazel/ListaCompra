@@ -1,0 +1,14 @@
+.DS_Store
+build/
+DerivedData/
+.gradle/
+android/.gradle/
+android/app/build/
+*.ipa
+*.apk
+*.aab
+artifact/*.ipa
+artifact/*.apk
+artifact/*.aab
+!artifact/.gitkeep
+!artifact/old/.gitkeep
