@@ -28,6 +28,12 @@ jobs:
             echo "No se encontro ListaCompra.app"
             exit 1
           fi
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist" || true)
+          if [ "$BUNDLE_ID" != "com.dmkr.listacompra" ]; then
+            echo "CFBundleIdentifier invalido o ausente: $BUNDLE_ID"
+            /usr/libexec/PlistBuddy -c "Print" "$APP_PATH/Info.plist" || true
+            exit 1
+          fi
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           zip -qry ListaCompra-iPhone-v1.0-build-${{ github.run_number }}.ipa Payload
