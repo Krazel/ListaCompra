@@ -52,18 +52,49 @@ struct Product: Identifiable, Codable, Equatable {
   }
 
   static func defaultAsset(for name: String) -> String {
-    switch name.lowercased() {
-    case "leche": return "product_milk"
-    case "pan": return "product_bread"
-    case "huevos": return "product_eggs"
-    case "tomates": return "product_tomato"
-    case "platanos": return "product_banana"
-    case "manzanas": return "product_apple"
-    case "detergente": return "product_detergent"
-    case "papel cocina", "papel higienico": return "product_paper"
-    case "aceite", "aceite de oliva": return "product_oil"
-    default: return "product_default"
-    }
+    let key = name.lowercased()
+    if key.contains("leche") { return "product_milk" }
+    if key.contains("pan") { return "product_bread" }
+    if key.contains("huevo") { return "product_eggs" }
+    if key.contains("tomate") { return "product_tomato" }
+    if key.contains("platano") || key.contains("banana") { return "product_banana" }
+    if key.contains("manzana") { return "product_apple" }
+    if key.contains("detergente") { return "product_detergent" }
+    if key.contains("papel") { return "product_paper" }
+    if key.contains("aceite") { return "product_oil" }
+    if key.contains("queso") { return "product_cheese" }
+    if key.contains("yogur") { return "product_yogurt" }
+    if key.contains("mantequilla") { return "product_butter" }
+    if key.contains("pollo") { return "product_chicken" }
+    if key.contains("pescado") || key.contains("atun") { return "product_fish" }
+    if key.contains("carne") || key.contains("filete") { return "product_meat" }
+    if key.contains("jamon") || key.contains("pavo") { return "product_ham" }
+    if key.contains("congel") { return "product_frozen" }
+    if key.contains("arroz") { return "product_rice" }
+    if key.contains("pasta") || key.contains("macarr") { return "product_pasta" }
+    if key.contains("harina") { return "product_flour" }
+    if key.contains("azucar") { return "product_sugar" }
+    if key.contains("sal") { return "product_salt" }
+    if key.contains("cafe") { return "product_coffee" }
+    if key.contains("te") || key.contains("infusion") { return "product_tea" }
+    if key.contains("cereal") { return "product_cereal" }
+    if key.contains("agua") { return "product_water" }
+    if key.contains("zumo") || key.contains("jugo") { return "product_juice" }
+    if key.contains("refresco") || key.contains("soda") { return "product_soda" }
+    if key.contains("vino") { return "product_wine" }
+    if key.contains("jabon") { return "product_soap" }
+    if key.contains("champu") { return "product_shampoo" }
+    if key.contains("dientes") || key.contains("dentifrico") || key.contains("pasta dental") { return "product_toothpaste" }
+    if key.contains("wc") || key.contains("inodoro") { return "product_toilet_cleaner" }
+    if key.contains("basura") { return "product_trash_bags" }
+    if key.contains("esponja") { return "product_sponge" }
+    if key.contains("lavavajillas") { return "product_dish_soap" }
+    if key.contains("suavizante") { return "product_softener" }
+    if key.contains("panal") || key.contains("pañal") { return "product_diapers" }
+    if key.contains("mascota") || key.contains("perro") || key.contains("gato") { return "product_pet_food" }
+    if key.contains("bebe") || key.contains("bebé") { return "product_baby_food" }
+    if key.contains("medicina") || key.contains("botiquin") { return "product_medicine" }
+    return "product_default"
   }
 }
 
@@ -856,7 +887,13 @@ struct ResourceIcon: View {
 struct AssetPicker: View {
   @Binding var selection: String
 
-  private let assets = ["product_default", "product_milk", "product_bread", "product_eggs", "product_tomato", "product_banana", "product_apple", "product_detergent", "product_paper", "product_oil"]
+  private let assets = [
+    "product_default", "product_milk", "product_bread", "product_eggs", "product_tomato", "product_banana", "product_apple", "product_detergent", "product_paper", "product_oil",
+    "product_cheese", "product_yogurt", "product_butter", "product_chicken", "product_fish", "product_meat", "product_ham", "product_frozen",
+    "product_rice", "product_pasta", "product_flour", "product_sugar", "product_salt", "product_coffee", "product_tea", "product_cereal",
+    "product_water", "product_juice", "product_soda", "product_wine", "product_soap", "product_shampoo", "product_toothpaste", "product_toilet_cleaner",
+    "product_trash_bags", "product_sponge", "product_dish_soap", "product_softener", "product_diapers", "product_pet_food", "product_baby_food", "product_medicine"
+  ]
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
