@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 @main
 struct ListaCompraApp: App {
@@ -22,9 +23,10 @@ struct Product: Identifiable, Codable, Equatable {
   var icon: String
   var assetName: String
   var emoji: String
+  var customImageData: Data?
   var tint: Int
 
-  init(id: UUID = UUID(), name: String, category: String, unit: String, icon: String, assetName: String = "product_default", emoji: String = "", tint: Int) {
+  init(id: UUID = UUID(), name: String, category: String, unit: String, icon: String, assetName: String = "product_default", emoji: String = "", customImageData: Data? = nil, tint: Int) {
     self.id = id
     self.name = name
     self.category = category
@@ -32,11 +34,12 @@ struct Product: Identifiable, Codable, Equatable {
     self.icon = icon
     self.assetName = assetName
     self.emoji = emoji
+    self.customImageData = customImageData
     self.tint = tint
   }
 
   enum CodingKeys: String, CodingKey {
-    case id, name, category, unit, icon, assetName, emoji, tint
+    case id, name, category, unit, icon, assetName, emoji, customImageData, tint
   }
 
   init(from decoder: Decoder) throws {
@@ -48,6 +51,7 @@ struct Product: Identifiable, Codable, Equatable {
     icon = try values.decodeIfPresent(String.self, forKey: .icon) ?? "cart"
     assetName = try values.decodeIfPresent(String.self, forKey: .assetName) ?? Self.defaultAsset(for: name)
     emoji = try values.decodeIfPresent(String.self, forKey: .emoji) ?? ""
+    customImageData = try values.decodeIfPresent(Data.self, forKey: .customImageData)
     tint = try values.decodeIfPresent(Int.self, forKey: .tint) ?? 0
   }
 
@@ -216,15 +220,15 @@ final class ShoppingStore: ObservableObject {
     }
   }
 
-  func addCustomProduct(name: String, category: String, unit: String, emoji: String, assetName: String) {
+  func addCustomProduct(name: String, category: String, unit: String, emoji: String, assetName: String, customImageData: Data? = nil) {
     let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !cleaned.isEmpty else { return }
     if products.contains(where: { $0.name.localizedCaseInsensitiveCompare(cleaned) == .orderedSame }) { return }
     let safeUnit = unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "ud" : unit
-    products.append(Product(name: cleaned, category: category.isEmpty ? "Otros" : category, unit: safeUnit, icon: "cart", assetName: assetName, emoji: emoji, tint: products.count % 6))
+    products.append(Product(name: cleaned, category: category.isEmpty ? "Otros" : category, unit: safeUnit, icon: "cart", assetName: assetName, emoji: emoji, customImageData: customImageData, tint: products.count % 6))
   }
 
-  func updateProduct(_ product: Product, name: String, category: String, unit: String, emoji: String, assetName: String) {
+  func updateProduct(_ product: Product, name: String, category: String, unit: String, emoji: String, assetName: String, customImageData: Data? = nil) {
     let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !cleaned.isEmpty, let index = products.firstIndex(where: { $0.id == product.id }) else { return }
     let updated = Product(
@@ -235,6 +239,7 @@ final class ShoppingStore: ObservableObject {
       icon: product.icon,
       assetName: assetName,
       emoji: emoji,
+      customImageData: customImageData,
       tint: product.tint
     )
     products[index] = updated
@@ -391,6 +396,11 @@ final class ShoppingStore: ObservableObject {
       let legacyItems = decode([ShoppingItem].self, key: legacyItemsKey) ?? Self.defaultItems(from: products)
       lists = [ShoppingList(name: "Lista de la compra", items: legacyItems)]
     }
+    if lists.count == 1, lists[0].name == "Lista de la compra" {
+      lists.append(ShoppingList(name: "Casa"))
+      lists.append(ShoppingList(name: "Semana"))
+      lists.append(ShoppingList(name: "Fiesta"))
+    }
     if let rawActive = UserDefaults.standard.string(forKey: activeListKey), let id = UUID(uuidString: rawActive), lists.contains(where: { $0.id == id }) {
       activeListID = id
     } else {
@@ -470,31 +480,15 @@ struct RootView: View {
 
 struct ListScreen: View {
   @EnvironmentObject private var store: ShoppingStore
-  @State private var showingListInfo = false
-  @State private var showingBulkImport = false
 
   var body: some View {
     NavigationStack {
       ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          HStack(alignment: .top) {
-            Header(title: store.activeList.name, subtitle: "Lista de la compra")
-            Spacer()
-            Button { showingListInfo = true } label: {
-              Image(systemName: "info.circle")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(AppColors.accent)
-            }
-          }
+        VStack(alignment: .leading, spacing: 12) {
+          ListTitleBar()
           ListSwitcher()
           SummaryPanel()
-          Button {
-            showingBulkImport = true
-          } label: {
-            Label("Pegar lista rapida", systemImage: "doc.on.clipboard")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(PrimaryButtonStyle())
+          MainQuickAddBar()
           ItemSection(title: "Por comprar", items: store.pendingItems)
           if !store.doneItems.isEmpty {
             HStack {
@@ -514,14 +508,6 @@ struct ListScreen: View {
         .padding(20)
       }
       .background(AppColors.background.ignoresSafeArea())
-      .sheet(isPresented: $showingListInfo) {
-        ListInfoSheet()
-          .environmentObject(store)
-      }
-      .sheet(isPresented: $showingBulkImport) {
-        BulkImportSheet()
-          .environmentObject(store)
-      }
     }
   }
 }
@@ -567,7 +553,7 @@ struct AddScreen: View {
       .scrollDismissesKeyboard(.interactively)
       .background(AppColors.background.ignoresSafeArea())
       .sheet(isPresented: $showingCreateProduct) {
-        ProductEditorSheet(mode: .create)
+        ProductEditorSheet(mode: .create())
           .environmentObject(store)
       }
     }
@@ -775,6 +761,49 @@ struct SummaryPanel: View {
   }
 }
 
+struct ListTitleBar: View {
+  @EnvironmentObject private var store: ShoppingStore
+  @State private var showingInfo = false
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 12) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(store.activeList.name)
+          .font(.system(size: 30, weight: .bold))
+          .foregroundStyle(AppColors.text)
+          .lineLimit(1)
+        Text("Lista de la compra")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(AppColors.muted)
+      }
+      Spacer()
+      Menu {
+        Button("Informacion de la lista", systemImage: "info.circle") {
+          showingInfo = true
+        }
+        Button("Compartir como texto", systemImage: "square.and.arrow.up") {
+          UIPasteboard.general.string = store.shareText
+        }
+        if store.lists.count > 1 {
+          Button("Eliminar lista", systemImage: "trash", role: .destructive) {
+            store.deleteList(store.activeList)
+          }
+        }
+      } label: {
+        Image(systemName: "ellipsis")
+          .font(.system(size: 20, weight: .bold))
+          .foregroundStyle(AppColors.text)
+          .frame(width: 42, height: 42)
+          .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
+      }
+    }
+    .sheet(isPresented: $showingInfo) {
+      ListInfoSheet()
+        .environmentObject(store)
+    }
+  }
+}
+
 struct ListSwitcher: View {
   @EnvironmentObject private var store: ShoppingStore
   @State private var newListName = ""
@@ -802,9 +831,9 @@ struct ListSwitcher: View {
       Button { creating = true } label: {
         Image(systemName: "plus")
           .font(.system(size: 15, weight: .bold))
-          .foregroundStyle(.white)
+          .foregroundStyle(AppColors.accent)
           .frame(width: 34, height: 34)
-          .background(AppColors.accent, in: Circle())
+          .background(AppColors.accent.opacity(0.14), in: Circle())
       }
     }
     .sheet(isPresented: $creating) {
@@ -833,6 +862,94 @@ struct ListSwitcher: View {
         }
       }
     }
+  }
+}
+
+struct MainQuickAddBar: View {
+  @EnvironmentObject private var store: ShoppingStore
+  @FocusState private var focused: Bool
+  @State private var query = ""
+  @State private var showingBulkImport = false
+  @State private var creatingProduct = false
+
+  private var matches: [Product] {
+    guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+    return store.products
+      .filter { $0.name.localizedCaseInsensitiveContains(query) || $0.category.localizedCaseInsensitiveContains(query) }
+      .prefix(4)
+      .map { $0 }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 8) {
+        Image(systemName: "magnifyingglass")
+          .foregroundStyle(AppColors.muted)
+        TextField("Anadir o buscar producto", text: $query)
+          .font(.system(size: 15, weight: .semibold))
+          .foregroundStyle(AppColors.text)
+          .focused($focused)
+          .submitLabel(.done)
+          .onSubmit(addBestMatch)
+        Button { showingBulkImport = true } label: {
+          Image(systemName: "doc.on.clipboard")
+            .frame(width: 34, height: 34)
+        }
+        Button {
+          creatingProduct = true
+        } label: {
+          Image(systemName: "plus")
+            .frame(width: 34, height: 34)
+        }
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(AppColors.accent)
+      .padding(10)
+      .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
+
+      if !matches.isEmpty {
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 8) {
+            ForEach(matches) { product in
+              Button {
+                store.add(product: product, quantity: 1)
+                query = ""
+                focused = false
+              } label: {
+                HStack(spacing: 6) {
+                  ProductIcon(product: product, size: 28)
+                  Text(product.name)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(AppColors.text)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 38)
+                .background(AppColors.surface, in: Capsule())
+              }
+              .buttonStyle(.plain)
+            }
+          }
+        }
+      }
+    }
+    .sheet(isPresented: $showingBulkImport) {
+      BulkImportSheet()
+        .environmentObject(store)
+    }
+    .sheet(isPresented: $creatingProduct) {
+      ProductEditorSheet(mode: .create(prefill: query))
+        .environmentObject(store)
+    }
+  }
+
+  private func addBestMatch() {
+    if let product = matches.first {
+      store.add(product: product, quantity: 1)
+      query = ""
+    } else {
+      creatingProduct = true
+    }
+    focused = false
   }
 }
 
@@ -1118,7 +1235,7 @@ struct ItemSection: View {
 }
 
 enum ProductEditorMode {
-  case create
+  case create(prefill: String = "")
   case edit(Product)
 }
 
@@ -1132,17 +1249,21 @@ struct ProductEditorSheet: View {
   @State private var unit: String
   @State private var emoji: String
   @State private var assetName: String
+  @State private var customImageData: Data?
+  @State private var selectedPhoto: PhotosPickerItem?
   @State private var imageMode: String
 
   init(mode: ProductEditorMode) {
     self.mode = mode
     switch mode {
-    case .create:
-      _name = State(initialValue: "")
+    case .create(let prefill):
+      _name = State(initialValue: prefill)
       _category = State(initialValue: "Otros")
       _unit = State(initialValue: "ud")
       _emoji = State(initialValue: "")
       _assetName = State(initialValue: "product_default")
+      _customImageData = State(initialValue: nil)
+      _selectedPhoto = State(initialValue: nil)
       _imageMode = State(initialValue: "Icono")
     case .edit(let product):
       _name = State(initialValue: product.name)
@@ -1150,7 +1271,9 @@ struct ProductEditorSheet: View {
       _unit = State(initialValue: product.unit)
       _emoji = State(initialValue: product.emoji)
       _assetName = State(initialValue: product.assetName)
-      _imageMode = State(initialValue: product.emoji.isEmpty ? "Icono" : "Emoji")
+      _customImageData = State(initialValue: product.customImageData)
+      _selectedPhoto = State(initialValue: nil)
+      _imageMode = State(initialValue: product.customImageData == nil ? (product.emoji.isEmpty ? "Icono" : "Emoji") : "Foto")
     }
   }
 
@@ -1165,7 +1288,13 @@ struct ProductEditorSheet: View {
         VStack(alignment: .leading, spacing: 16) {
           Header(title: title, subtitle: "Nombre, categoria, unidad e imagen.")
           HStack {
-            if imageMode == "Emoji", !emoji.isEmpty {
+            if imageMode == "Foto", let customImageData, let image = UIImage(data: customImageData) {
+              Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 74, height: 74)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else if imageMode == "Emoji", !emoji.isEmpty {
               Text(String(emoji.prefix(2)))
                 .font(.system(size: 34, weight: .bold))
                 .frame(width: 74, height: 74)
@@ -1200,13 +1329,15 @@ struct ProductEditorSheet: View {
             TextField("Emoji", text: $emoji)
               .textFieldStyle(AppTextFieldStyle())
               .focused($focused)
+          } else if imageMode == "Foto" {
+            PhotosPicker(selection: $selectedPhoto, matching: .images) {
+              Label(customImageData == nil ? "Elegir imagen del movil" : "Cambiar imagen del movil", systemImage: "photo.on.rectangle")
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            AssetPicker(selection: $assetName)
           } else {
             AssetPicker(selection: $assetName)
-            if imageMode == "Foto" {
-              Text("Pendiente: selector de galeria/camara nativo. Puedes guardar con icono o emoji mientras tanto.")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(AppColors.muted)
-            }
           }
           if case .edit(let product) = mode {
             Button {
@@ -1224,6 +1355,10 @@ struct ProductEditorSheet: View {
       }
       .scrollDismissesKeyboard(.interactively)
       .simultaneousGesture(TapGesture().onEnded { focused = false })
+      .task(id: selectedPhoto) {
+        guard let selectedPhoto else { return }
+        customImageData = try? await selectedPhoto.loadTransferable(type: Data.self)
+      }
       .background(AppColors.background.ignoresSafeArea())
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -1231,11 +1366,13 @@ struct ProductEditorSheet: View {
         }
         ToolbarItem(placement: .confirmationAction) {
           Button("Guardar") {
+            let savedPhoto = imageMode == "Foto" ? customImageData : nil
+            let savedEmoji = imageMode == "Emoji" ? emoji : ""
             switch mode {
-            case .create:
-              store.addCustomProduct(name: name, category: category, unit: unit, emoji: imageMode == "Emoji" ? emoji : "", assetName: assetName)
+            case .create(_):
+              store.addCustomProduct(name: name, category: category, unit: unit, emoji: savedEmoji, assetName: assetName, customImageData: savedPhoto)
             case .edit(let product):
-              store.updateProduct(product, name: name, category: category, unit: unit, emoji: imageMode == "Emoji" ? emoji : "", assetName: assetName)
+              store.updateProduct(product, name: name, category: category, unit: unit, emoji: savedEmoji, assetName: assetName, customImageData: savedPhoto)
             }
             dismiss()
           }
@@ -1373,7 +1510,7 @@ struct ProductCard: View {
           .font(.system(size: 16, weight: .bold))
           .foregroundStyle(AppColors.text)
           .lineLimit(1)
-        Text(product.category)
+        Text(defaultDisplayUnit(for: product))
           .font(.system(size: 12, weight: .bold))
           .foregroundStyle(AppColors.muted)
         Label("Anadir", systemImage: "plus.circle.fill")
@@ -1405,6 +1542,19 @@ struct ProductCard: View {
       ProductBaseListsSheet(product: product)
         .environmentObject(store)
     }
+  }
+}
+
+func defaultDisplayUnit(for product: Product) -> String {
+  switch product.name.lowercased() {
+  case "leche": return "1 L"
+  case "huevos": return "12 uds"
+  case "tomates": return "500 g"
+  case "platanos", "manzanas", "arroz": return "1 kg"
+  case "papel higienico": return "6 uds"
+  case "pasta", "cafe": return "1 paq"
+  case "congelados": return "1 bolsa"
+  default: return "1 \(product.unit)"
   }
 }
 
@@ -1476,7 +1626,13 @@ struct ProductIcon: View {
   let size: CGFloat
 
   var body: some View {
-    if !product.emoji.isEmpty {
+    if let data = product.customImageData, let image = UIImage(data: data) {
+      Image(uiImage: image)
+        .resizable()
+        .scaledToFill()
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    } else if !product.emoji.isEmpty {
       Text(String(product.emoji.prefix(2)))
         .font(.system(size: size * 0.46, weight: .bold))
         .frame(width: size, height: size)

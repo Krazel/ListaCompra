@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -30,6 +31,7 @@ import java.util.UUID;
 
 public class MainActivity extends Activity {
     private static final String PREFS = "lista_compra";
+    private static final int REQUEST_PICK_IMAGE = 4101;
 
     private final ArrayList<Product> products = new ArrayList<>();
     private final ArrayList<ShoppingList> lists = new ArrayList<>();
@@ -41,6 +43,8 @@ public class MainActivity extends Activity {
     private int currentTab = 0;
     private boolean canEdit = true;
     private int quantity = 1;
+    private EditText pendingImageInput;
+    private String pendingImageUri = "";
 
     private final int background = Color.parseColor("#050806");
     private final int surface = Color.parseColor("#171B18");
@@ -56,6 +60,22 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         load();
         render();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_PICK_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            pendingImageUri = uri.toString();
+            int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            try {
+                getContentResolver().takePersistableUriPermission(uri, flags);
+            } catch (Exception ignored) { }
+            if (pendingImageInput != null) {
+                pendingImageInput.setText(pendingImageUri);
+            }
+        }
     }
 
     private void render() {
@@ -80,16 +100,16 @@ public class MainActivity extends Activity {
 
     private void showList(LinearLayout root) {
         ShoppingList list = activeList();
-        root.addView(header(list.name, "Lista de la compra"));
+        root.addView(compactListHeader(list));
         root.addView(listSwitcher());
 
         LinearLayout metrics = new LinearLayout(this);
         metrics.setOrientation(LinearLayout.HORIZONTAL);
-        metrics.addView(metric("Total", String.valueOf(list.items.size())), new LinearLayout.LayoutParams(0, dp(78), 1));
-        metrics.addView(withLeft(metric("Pendiente", String.valueOf(pendingCount())), 10), new LinearLayout.LayoutParams(0, dp(78), 1));
-        metrics.addView(withLeft(metric("Hecho", String.valueOf(doneCount())), 10), new LinearLayout.LayoutParams(0, dp(78), 1));
-        root.addView(withBottom(metrics, 18));
-        root.addView(withBottom(actionButton("Pegar lista rapida", v -> showBulkImportDialog()), 14), new LinearLayout.LayoutParams(-1, dp(48)));
+        metrics.addView(metric("Total", String.valueOf(list.items.size())), new LinearLayout.LayoutParams(0, dp(58), 1));
+        metrics.addView(withLeft(metric("Pendiente", String.valueOf(pendingCount())), 8), new LinearLayout.LayoutParams(0, dp(58), 1));
+        metrics.addView(withLeft(metric("Hecho", String.valueOf(doneCount())), 8), new LinearLayout.LayoutParams(0, dp(58), 1));
+        root.addView(withBottom(metrics, 10));
+        root.addView(quickAddBar());
 
         root.addView(section("Por comprar"));
         int pending = 0;
@@ -116,8 +136,8 @@ public class MainActivity extends Activity {
     }
 
     private void showAdd(LinearLayout root) {
-        root.addView(header("Anadir producto", "Catalogo con imagen o emoji por producto."));
-        root.addView(withBottom(actionButton("Buscar producto", v -> showSearchDialog()), 12), new LinearLayout.LayoutParams(-1, dp(48)));
+        root.addView(addHeader());
+        root.addView(withBottom(actionButton("Buscar producto", v -> showSearchDialog()), 12), new LinearLayout.LayoutParams(-1, dp(44)));
 
         LinearLayout qty = card();
         LinearLayout row = new LinearLayout(this);
@@ -141,11 +161,6 @@ public class MainActivity extends Activity {
             grid.addView(productCard(product), lp);
         }
         root.addView(grid);
-
-        LinearLayout custom = card();
-        custom.addView(label("Crear producto", 18, text, true));
-        custom.addView(withTop(actionButton("Nuevo producto", v -> showCreateProductDialog()), 12), new LinearLayout.LayoutParams(-1, dp(48)));
-        root.addView(custom);
     }
 
     private void showPresets(LinearLayout root) {
@@ -193,19 +208,26 @@ public class MainActivity extends Activity {
     }
 
     private View listSwitcher() {
-        LinearLayout panel = card();
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.HORIZONTAL);
+        panel.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         for (ShoppingList list : lists) {
-            row.addView(withLeft(textButton(list.id.equals(activeListId) ? list.name : list.name, v -> {
+            Button chip = textButton(list.name, v -> {
                 activeListId = list.id;
                 save();
                 render();
-            }), row.getChildCount() == 0 ? 0 : 8), new LinearLayout.LayoutParams(-2, dp(40)));
+            });
+            chip.setTextColor(list.id.equals(activeListId) ? text : accent);
+            chip.setBackground(rounded(list.id.equals(activeListId) ? accent : withAlpha(accent, 32), 18));
+            row.addView(withLeft(chip, row.getChildCount() == 0 ? 0 : 8), new LinearLayout.LayoutParams(-2, dp(36)));
         }
-        panel.addView(row);
-        panel.addView(withTop(actionButton("Crear lista", v -> showCreateListDialog()), 12), new LinearLayout.LayoutParams(-1, dp(46)));
-        return withBottom(panel, 14);
+        panel.addView(row, new LinearLayout.LayoutParams(0, dp(38), 1));
+        Button plus = textButton("+", v -> showCreateListDialog());
+        plus.setTextSize(18);
+        panel.addView(withLeft(plus, 8), new LinearLayout.LayoutParams(dp(40), dp(38)));
+        return withBottom(panel, 10);
     }
 
     private void showMore(LinearLayout root) {
@@ -280,11 +302,23 @@ public class MainActivity extends Activity {
         });
         card.addView(productIcon(product, 54));
         card.addView(withTop(label(product.name, 16, text, true), 10));
-        card.addView(label(product.unit, 12, muted, true));
+        card.addView(label(defaultDisplayUnit(product), 12, muted, true));
         TextView add = label("+ Anadir", 13, accent, true);
         add.setPadding(0, dp(10), 0, 0);
         card.addView(add);
         return card;
+    }
+
+    private String defaultDisplayUnit(Product product) {
+        String key = product.name.toLowerCase(Locale.ROOT);
+        if (key.equals("leche")) return "1 L";
+        if (key.equals("huevos")) return "12 uds";
+        if (key.equals("tomates")) return "500 g";
+        if (key.equals("platanos") || key.equals("manzanas") || key.equals("arroz")) return "1 kg";
+        if (key.equals("papel higienico")) return "6 uds";
+        if (key.equals("pasta") || key.equals("cafe")) return "1 paq";
+        if (key.equals("congelados")) return "1 bolsa";
+        return "1 " + product.unit;
     }
 
     private View presetCard(PresetList preset) {
@@ -373,6 +407,20 @@ public class MainActivity extends Activity {
     }
 
     private View productIcon(Product product, int size) {
+        if (!product.imageUri.trim().isEmpty()) {
+            ImageView image = new ImageView(this);
+            try {
+                image.setImageURI(Uri.parse(product.imageUri));
+            } catch (Exception ignored) {
+                int resId = getResources().getIdentifier(product.imageName, "drawable", getPackageName());
+                image.setImageResource(resId == 0 ? getResources().getIdentifier("product_default", "drawable", getPackageName()) : resId);
+            }
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(size), dp(size));
+            lp.setMargins(0, 0, dp(6), 0);
+            image.setLayoutParams(lp);
+            return image;
+        }
         if (!product.emoji.trim().isEmpty()) {
             TextView emoji = label(product.emoji.trim(), Math.max(18, size / 2), text, true);
             emoji.setGravity(Gravity.CENTER);
@@ -404,6 +452,86 @@ public class MainActivity extends Activity {
         box.addView(label(title, 30, text, true));
         box.addView(label(subtitle, 15, muted, false));
         return box;
+    }
+
+    private View compactListHeader(ShoppingList list) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, 0, 0, dp(12));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(label(list.name, 30, text, true));
+        copy.addView(label("Lista de la compra", 14, muted, false));
+        row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        Button menu = textButton("...", v -> showListMenu());
+        menu.setTextSize(20);
+        row.addView(menu, new LinearLayout.LayoutParams(dp(44), dp(42)));
+        return row;
+    }
+
+    private View addHeader() {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, 0, 0, dp(16));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(label("Anadir productos", 30, text, true));
+        copy.addView(label("Catalogo con imagen o emoji por producto.", 14, muted, false));
+        row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        Button plus = textButton("+", v -> showCreateProductDialog());
+        plus.setTextSize(22);
+        plus.setTextColor(text);
+        plus.setBackground(rounded(accent, 8));
+        row.addView(plus, new LinearLayout.LayoutParams(dp(44), dp(42)));
+        return row;
+    }
+
+    private View quickAddBar() {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackground(rounded(surface, 8));
+        EditText input = input("Anadir o buscar producto");
+        row.addView(input, new LinearLayout.LayoutParams(0, dp(42), 1));
+        row.addView(withLeft(textButton("Pegar", v -> showBulkImportDialog()), 8), new LinearLayout.LayoutParams(dp(76), dp(42)));
+        row.addView(withLeft(textButton("+", v -> showCreateProductDialog()), 8), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        input.setOnEditorActionListener((v, actionId, event) -> {
+            addByQuery(input.getText().toString());
+            return true;
+        });
+        return withBottom(row, 12);
+    }
+
+    private void addByQuery(String value) {
+        String query = value.trim().toLowerCase(Locale.ROOT);
+        if (query.isEmpty()) return;
+        for (Product product : products) {
+            if (product.name.toLowerCase(Locale.ROOT).contains(query) || product.category.toLowerCase(Locale.ROOT).contains(query)) {
+                addProduct(product, 1);
+                render();
+                return;
+            }
+        }
+        showCreateProductDialog(query);
+    }
+
+    private void showListMenu() {
+        String[] actions = lists.size() > 1
+            ? new String[]{"Copiar lista", "Eliminar lista"}
+            : new String[]{"Copiar lista"};
+        new AlertDialog.Builder(this)
+            .setTitle(activeList().name)
+            .setItems(actions, (dialog, which) -> {
+                if (which == 0) shareList();
+                else {
+                    ShoppingList current = activeList();
+                    lists.remove(current);
+                    activeListId = lists.get(0).id;
+                    save();
+                    render();
+                }
+            })
+            .show();
     }
 
     private View bottomNav() {
@@ -443,17 +571,29 @@ public class MainActivity extends Activity {
     }
 
     private void showCreateProductDialog() {
+        showCreateProductDialog("");
+    }
+
+    private void showCreateProductDialog(String prefill) {
+        pendingImageUri = "";
+        pendingImageInput = null;
         LinearLayout form = dialogForm();
         EditText name = input("Nombre");
+        name.setText(prefill);
         EditText category = input("Categoria");
         EditText unit = input("Unidad, ej. ud, kg, l");
         EditText emoji = input("Emoji o deja vacio");
         EditText image = input("Imagen de la app, ej. product_rice");
+        EditText imageUri = input("Imagen del movil");
+        imageUri.setFocusable(false);
+        pendingImageInput = imageUri;
         form.addView(name);
         form.addView(category);
         form.addView(unit);
         form.addView(emoji);
         form.addView(image);
+        form.addView(imageUri);
+        form.addView(withTop(actionButton("Elegir imagen del movil", v -> pickImageFromMobile()), 10), new LinearLayout.LayoutParams(-1, dp(48)));
         new AlertDialog.Builder(this)
             .setTitle("Nuevo producto")
             .setView(form)
@@ -463,12 +603,20 @@ public class MainActivity extends Activity {
                 if (!cleaned.isEmpty()) {
                     String safeUnit = unit.getText().toString().trim().isEmpty() ? "ud" : unit.getText().toString().trim();
                     String imageName = image.getText().toString().trim().isEmpty() ? Product.defaultImage(cleaned) : image.getText().toString().trim();
-                    products.add(new Product(cleaned, blankTo(category.getText().toString(), "Otros"), safeUnit, imageName, emoji.getText().toString().trim()));
+                    products.add(new Product(cleaned, blankTo(category.getText().toString(), "Otros"), safeUnit, imageName, emoji.getText().toString().trim(), imageUri.getText().toString().trim()));
                     save();
                     render();
                 }
             })
             .show();
+    }
+
+    private void pickImageFromMobile() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_PICK_IMAGE);
     }
 
     private void showBulkImportDialog() {
@@ -669,6 +817,11 @@ public class MainActivity extends Activity {
                 if (product != null) list.items.add(new ShoppingItem(product, name.equals("Tomates") ? 500 : 1, false));
             }
             lists.add(list);
+        }
+        if (lists.size() == 1 && "Lista de la compra".equals(lists.get(0).name)) {
+            lists.add(new ShoppingList("Casa"));
+            lists.add(new ShoppingList("Semana"));
+            lists.add(new ShoppingList("Fiesta"));
         }
         activeListId = prefs.getString("activeListId.v2", lists.get(0).id);
     }
@@ -875,18 +1028,24 @@ public class MainActivity extends Activity {
         final String unit;
         final String imageName;
         final String emoji;
+        final String imageUri;
 
         Product(String name, String category, String unit, String imageName, String emoji) {
-            this(UUID.randomUUID().toString(), name, category, unit, imageName, emoji);
+            this(UUID.randomUUID().toString(), name, category, unit, imageName, emoji, "");
         }
 
-        Product(String id, String name, String category, String unit, String imageName, String emoji) {
+        Product(String name, String category, String unit, String imageName, String emoji, String imageUri) {
+            this(UUID.randomUUID().toString(), name, category, unit, imageName, emoji, imageUri);
+        }
+
+        Product(String id, String name, String category, String unit, String imageName, String emoji, String imageUri) {
             this.id = id;
             this.name = name;
             this.category = category;
             this.unit = unit;
             this.imageName = imageName == null || imageName.trim().isEmpty() ? defaultImage(name) : imageName;
             this.emoji = emoji == null ? "" : emoji;
+            this.imageUri = imageUri == null ? "" : imageUri;
         }
 
         JSONObject toJson() throws Exception {
@@ -897,6 +1056,7 @@ public class MainActivity extends Activity {
             json.put("unit", unit);
             json.put("imageName", imageName);
             json.put("emoji", emoji);
+            json.put("imageUri", imageUri);
             return json;
         }
 
@@ -907,7 +1067,8 @@ public class MainActivity extends Activity {
                 json.optString("category", "Otros"),
                 json.optString("unit", "ud"),
                 json.optString("imageName", defaultImage(json.optString("name"))),
-                json.optString("emoji", "")
+                json.optString("emoji", ""),
+                json.optString("imageUri", "")
             );
         }
 
