@@ -1546,18 +1546,18 @@ struct ProductCard: View {
   @State private var choosingBaseLists = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    ZStack(alignment: .trailing) {
       Button {
         store.add(product: product, quantity: quantity)
       } label: {
-        VStack(alignment: .leading, spacing: 8) {
-          ProductIcon(product: product, size: 54)
+        HStack(spacing: 10) {
+          ProductIcon(product: product, size: 42)
           VStack(alignment: .leading, spacing: 3) {
             Text(product.name)
-              .font(.system(size: 16, weight: .bold))
+              .font(.system(size: 15, weight: .bold))
               .foregroundStyle(AppColors.text)
               .lineLimit(2)
-              .minimumScaleFactor(0.78)
+              .minimumScaleFactor(0.82)
               .fixedSize(horizontal: false, vertical: true)
             Text(product.category)
               .font(.system(size: 12, weight: .medium))
@@ -1565,26 +1565,36 @@ struct ProductCard: View {
               .lineLimit(1)
               .truncationMode(.tail)
           }
+          Spacer(minLength: 36)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
       .buttonStyle(.plain)
-      Spacer(minLength: 0)
-      HStack(spacing: 8) {
-        Button { editing = true } label: {
+
+      VStack(spacing: 8) {
+        Button {
+          editing = true
+        } label: {
           Image(systemName: "pencil")
-            .frame(width: 34, height: 30)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(AppColors.accent)
+            .frame(width: 30, height: 30)
+            .background(AppColors.accent.opacity(0.14), in: Circle())
         }
-        Button { choosingBaseLists = true } label: {
+        Button {
+          choosingBaseLists = true
+        } label: {
           Image(systemName: "star.badge.plus")
-            .frame(width: 34, height: 30)
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(AppColors.accent)
+            .frame(width: 30, height: 30)
+            .background(AppColors.accent.opacity(0.14), in: Circle())
         }
       }
-      .font(.system(size: 13, weight: .bold))
-      .foregroundStyle(AppColors.accent)
+      .buttonStyle(.plain)
     }
-    .padding(12)
-    .frame(maxWidth: .infinity, minHeight: 176, alignment: .leading)
+    .padding(10)
+    .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
     .dynamicTypeSize(.small ... .large)
     .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
     .sheet(isPresented: $editing) {

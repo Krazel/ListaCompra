@@ -156,7 +156,7 @@ public class MainActivity extends Activity {
         for (Product product : products) {
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
             lp.width = (getResources().getDisplayMetrics().widthPixels - dp(52)) / 2;
-            lp.height = dp(176);
+            lp.height = dp(104);
             lp.setMargins(0, 0, dp(12), dp(12));
             grid.addView(productCard(product), lp);
         }
@@ -291,8 +291,9 @@ public class MainActivity extends Activity {
 
     private View productCard(Product product) {
         LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(10), dp(10), dp(10), dp(10));
         card.setBackground(rounded(surface, 8));
         card.setOnClickListener(v -> {
             addProduct(product, quantity);
@@ -300,12 +301,17 @@ public class MainActivity extends Activity {
             currentTab = 0;
             render();
         });
-        card.addView(productIcon(product, 54));
-        card.addView(withTop(label(product.name, 16, text, true), 10));
-        card.addView(label(product.category, 12, muted, false));
-        TextView add = label("+ Anadir", 13, accent, true);
-        add.setPadding(0, dp(10), 0, 0);
-        card.addView(add);
+        card.addView(productIcon(product, 42));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setPadding(dp(8), 0, dp(6), 0);
+        copy.addView(label(product.name, 15, text, true));
+        copy.addView(label(product.category, 12, muted, false));
+        card.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        Button edit = textButton("✎", v -> showEditProductDialog(product));
+        edit.setTextSize(16);
+        edit.setBackground(rounded(withAlpha(accent, 36), 18));
+        card.addView(edit, new LinearLayout.LayoutParams(dp(36), dp(36)));
         return card;
     }
 
@@ -598,6 +604,44 @@ public class MainActivity extends Activity {
                     save();
                     render();
                 }
+            })
+            .show();
+    }
+
+    private void showEditProductDialog(Product product) {
+        pendingImageUri = product.imageUri;
+        pendingImageInput = null;
+        LinearLayout form = dialogForm();
+        EditText name = input("Nombre");
+        name.setText(product.name);
+        EditText category = input("Categoria");
+        category.setText(product.category);
+        EditText emoji = input("Emoji o deja vacio");
+        emoji.setText(product.emoji);
+        EditText image = input("Imagen de la app, ej. product_rice");
+        image.setText(product.imageName);
+        EditText imageUri = input("Imagen del movil");
+        imageUri.setText(product.imageUri);
+        imageUri.setFocusable(false);
+        pendingImageInput = imageUri;
+        form.addView(name);
+        form.addView(category);
+        form.addView(emoji);
+        form.addView(image);
+        form.addView(imageUri);
+        form.addView(withTop(actionButton("Elegir imagen del movil", v -> pickImageFromMobile()), 10), new LinearLayout.LayoutParams(-1, dp(48)));
+        new AlertDialog.Builder(this)
+            .setTitle("Editar producto")
+            .setView(form)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Guardar", (dialog, which) -> {
+                product.name = blankTo(name.getText().toString(), product.name);
+                product.category = blankTo(category.getText().toString(), "Otros");
+                product.emoji = emoji.getText().toString().trim();
+                product.imageName = blankTo(image.getText().toString(), Product.defaultImage(product.name));
+                product.imageUri = imageUri.getText().toString().trim();
+                save();
+                render();
             })
             .show();
     }
@@ -1038,12 +1082,12 @@ public class MainActivity extends Activity {
 
     private static final class Product {
         final String id;
-        final String name;
-        final String category;
+        String name;
+        String category;
         final String unit;
-        final String imageName;
-        final String emoji;
-        final String imageUri;
+        String imageName;
+        String emoji;
+        String imageUri;
 
         Product(String name, String category, String unit, String imageName, String emoji) {
             this(UUID.randomUUID().toString(), name, category, unit, imageName, emoji, "");
