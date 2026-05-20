@@ -1553,19 +1553,27 @@ struct ProductCard: View {
       Button {
         store.add(product: product, quantity: quantity)
       } label: {
-        ProductIcon(product: product, size: 46)
-        Text(product.name)
-          .font(.system(size: 15, weight: .bold))
-          .foregroundStyle(AppColors.text)
-          .lineLimit(2)
-          .minimumScaleFactor(0.86)
-        Text(product.category)
-          .font(.system(size: 12, weight: .medium))
-          .foregroundStyle(AppColors.muted)
-          .lineLimit(1)
-        Text("1 \(product.unit)")
-          .font(.system(size: 13, weight: .bold))
-          .foregroundStyle(AppColors.accent)
+        VStack(alignment: .leading, spacing: 8) {
+          ProductIcon(product: product, size: 54)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(product.name)
+              .font(.system(size: 16, weight: .bold))
+              .foregroundStyle(AppColors.text)
+              .lineLimit(2)
+              .minimumScaleFactor(0.78)
+              .fixedSize(horizontal: false, vertical: true)
+            Text(product.category)
+              .font(.system(size: 12, weight: .medium))
+              .foregroundStyle(AppColors.muted)
+              .lineLimit(1)
+              .truncationMode(.tail)
+            Text("1 \(product.unit)")
+              .font(.system(size: 13, weight: .bold))
+              .foregroundStyle(AppColors.accent)
+              .lineLimit(1)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
       .buttonStyle(.plain)
       Spacer(minLength: 0)
@@ -1584,6 +1592,7 @@ struct ProductCard: View {
     }
     .padding(12)
     .frame(maxWidth: .infinity, minHeight: 176, alignment: .leading)
+    .dynamicTypeSize(.small ... .large)
     .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
     .sheet(isPresented: $editing) {
       ProductEditorSheet(mode: .edit(product))
