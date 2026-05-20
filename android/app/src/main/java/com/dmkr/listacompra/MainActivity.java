@@ -280,7 +280,7 @@ public class MainActivity extends Activity {
         textBox.setOrientation(LinearLayout.VERTICAL);
         textBox.setPadding(dp(10), 0, 0, 0);
         textBox.addView(label(item.product.name, 16, item.checked ? muted : text, true));
-        textBox.addView(label(item.quantity + " " + item.product.unit, 13, muted, false));
+        textBox.addView(label(String.valueOf(item.quantity), 13, muted, false));
         row.addView(textBox, new LinearLayout.LayoutParams(0, -2, 1));
 
         row.addView(textButton("-", v -> { item.quantity = Math.max(1, item.quantity - 1); save(); render(); }), new LinearLayout.LayoutParams(dp(36), dp(38)));
@@ -303,7 +303,6 @@ public class MainActivity extends Activity {
         card.addView(productIcon(product, 54));
         card.addView(withTop(label(product.name, 16, text, true), 10));
         card.addView(label(product.category, 12, muted, false));
-        card.addView(label("1 " + product.unit, 13, accent, true));
         TextView add = label("+ Anadir", 13, accent, true);
         add.setPadding(0, dp(10), 0, 0);
         card.addView(add);
@@ -574,7 +573,6 @@ public class MainActivity extends Activity {
         EditText name = input("Nombre");
         name.setText(prefill);
         EditText category = input("Categoria");
-        EditText unit = input("Unidad, ej. ud, kg, l");
         EditText emoji = input("Emoji o deja vacio");
         EditText image = input("Imagen de la app, ej. product_rice");
         EditText imageUri = input("Imagen del movil");
@@ -582,7 +580,6 @@ public class MainActivity extends Activity {
         pendingImageInput = imageUri;
         form.addView(name);
         form.addView(category);
-        form.addView(unit);
         form.addView(emoji);
         form.addView(image);
         form.addView(imageUri);
@@ -594,9 +591,8 @@ public class MainActivity extends Activity {
             .setPositiveButton("Guardar", (dialog, which) -> {
                 String cleaned = name.getText().toString().trim();
                 if (!cleaned.isEmpty()) {
-                    String safeUnit = unit.getText().toString().trim().isEmpty() ? "ud" : unit.getText().toString().trim();
                     String imageName = image.getText().toString().trim().isEmpty() ? Product.defaultImage(cleaned) : image.getText().toString().trim();
-                    Product product = new Product(cleaned, blankTo(category.getText().toString(), "Otros"), safeUnit, imageName, emoji.getText().toString().trim(), imageUri.getText().toString().trim());
+                    Product product = new Product(cleaned, blankTo(category.getText().toString(), "Otros"), "ud", imageName, emoji.getText().toString().trim(), imageUri.getText().toString().trim());
                     products.add(product);
                     if (addToListAfterCreate) addProduct(product, 1);
                     save();
@@ -773,7 +769,7 @@ public class MainActivity extends Activity {
     private String shareText() {
         StringBuilder builder = new StringBuilder(activeList().name).append("\n");
         for (ShoppingItem item : activeList().items) {
-            builder.append("- ").append(item.product.name).append(": ").append(item.quantity).append(" ").append(item.product.unit);
+            builder.append("- ").append(item.product.name).append(": ").append(item.quantity);
             if (item.checked) builder.append(" (comprado)");
             builder.append("\n");
         }

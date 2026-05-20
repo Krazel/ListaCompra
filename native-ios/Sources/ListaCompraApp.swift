@@ -202,7 +202,7 @@ final class ShoppingStore: ObservableObject {
   var doneItems: [ShoppingItem] { items.filter { $0.checked } }
 
   var shareText: String {
-    let lines = items.map { "- \($0.product.name): \($0.quantity) \($0.product.unit)\($0.checked ? " (comprado)" : "")" }
+    let lines = items.map { "- \($0.product.name): \($0.quantity)\($0.checked ? " (comprado)" : "")" }
     return "\(activeList.name)\n" + lines.joined(separator: "\n")
   }
 
@@ -1332,7 +1332,7 @@ struct ProductEditorSheet: View {
     NavigationStack {
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
-          Header(title: title, subtitle: "Nombre, categoria, unidad e imagen.")
+          Header(title: title, subtitle: "Nombre, categoria e imagen.")
           HStack {
             if imageMode == "Foto", let customImageData, let image = UIImage(data: customImageData) {
               Image(uiImage: image)
@@ -1362,9 +1362,6 @@ struct ProductEditorSheet: View {
             .focused($focused)
           CategorySelector(selection: $category)
             .environmentObject(store)
-          TextField("Unidad", text: $unit)
-            .textFieldStyle(AppTextFieldStyle())
-            .focused($focused)
           Picker("Imagen", selection: $imageMode) {
             Text("Icono").tag("Icono")
             Text("Emoji").tag("Emoji")
@@ -1519,7 +1516,7 @@ struct ItemRow: View {
       Spacer()
       HStack(spacing: 8) {
         Button { store.decrement(item) } label: { Image(systemName: "minus") }
-        Text("\(item.quantity) \(item.product.unit)")
+        Text("\(item.quantity)")
           .font(.system(size: 13, weight: .bold))
           .frame(minWidth: 46)
         Button { store.increment(item) } label: { Image(systemName: "plus") }
@@ -1567,10 +1564,6 @@ struct ProductCard: View {
               .foregroundStyle(AppColors.muted)
               .lineLimit(1)
               .truncationMode(.tail)
-            Text("1 \(product.unit)")
-              .font(.system(size: 13, weight: .bold))
-              .foregroundStyle(AppColors.accent)
-              .lineLimit(1)
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
