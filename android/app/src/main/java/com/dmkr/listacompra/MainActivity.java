@@ -156,7 +156,7 @@ public class MainActivity extends Activity {
         for (Product product : products) {
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
             lp.width = (getResources().getDisplayMetrics().widthPixels - dp(52)) / 2;
-            lp.height = dp(158);
+            lp.height = dp(176);
             lp.setMargins(0, 0, dp(12), dp(12));
             grid.addView(productCard(product), lp);
         }
@@ -302,23 +302,12 @@ public class MainActivity extends Activity {
         });
         card.addView(productIcon(product, 54));
         card.addView(withTop(label(product.name, 16, text, true), 10));
-        card.addView(label(defaultDisplayUnit(product), 12, muted, true));
+        card.addView(label(product.category, 12, muted, false));
+        card.addView(label("1 " + product.unit, 13, accent, true));
         TextView add = label("+ Anadir", 13, accent, true);
         add.setPadding(0, dp(10), 0, 0);
         card.addView(add);
         return card;
-    }
-
-    private String defaultDisplayUnit(Product product) {
-        String key = product.name.toLowerCase(Locale.ROOT);
-        if (key.equals("leche")) return "1 L";
-        if (key.equals("huevos")) return "12 uds";
-        if (key.equals("tomates")) return "500 g";
-        if (key.equals("platanos") || key.equals("manzanas") || key.equals("arroz")) return "1 kg";
-        if (key.equals("papel higienico")) return "6 uds";
-        if (key.equals("pasta") || key.equals("cafe")) return "1 paq";
-        if (key.equals("congelados")) return "1 bolsa";
-        return "1 " + product.unit;
     }
 
     private View presetCard(PresetList preset) {
@@ -571,10 +560,14 @@ public class MainActivity extends Activity {
     }
 
     private void showCreateProductDialog() {
-        showCreateProductDialog("");
+        showCreateProductDialog("", false);
     }
 
     private void showCreateProductDialog(String prefill) {
+        showCreateProductDialog(prefill, false);
+    }
+
+    private void showCreateProductDialog(String prefill, boolean addToListAfterCreate) {
         pendingImageUri = "";
         pendingImageInput = null;
         LinearLayout form = dialogForm();
@@ -603,7 +596,9 @@ public class MainActivity extends Activity {
                 if (!cleaned.isEmpty()) {
                     String safeUnit = unit.getText().toString().trim().isEmpty() ? "ud" : unit.getText().toString().trim();
                     String imageName = image.getText().toString().trim().isEmpty() ? Product.defaultImage(cleaned) : image.getText().toString().trim();
-                    products.add(new Product(cleaned, blankTo(category.getText().toString(), "Otros"), safeUnit, imageName, emoji.getText().toString().trim(), imageUri.getText().toString().trim()));
+                    Product product = new Product(cleaned, blankTo(category.getText().toString(), "Otros"), safeUnit, imageName, emoji.getText().toString().trim(), imageUri.getText().toString().trim());
+                    products.add(product);
+                    if (addToListAfterCreate) addProduct(product, 1);
                     save();
                     render();
                 }
@@ -628,24 +623,48 @@ public class MainActivity extends Activity {
         form.addView(input);
         new AlertDialog.Builder(this)
             .setTitle("Pegar lista rapida")
-            .setMessage("Los productos que no existan se anadiran al catalogo con imagen automatica.")
+            .setMessage("Se anadiran solo los productos que ya existen. Los nuevos se revisan despues.")
             .setView(form)
             .setNegativeButton("Cancelar", null)
-            .setPositiveButton("Anadir", (dialog, which) -> {
-                String[] parts = input.getText().toString().split("[,;\\n]");
-                for (String part : parts) {
+            .setPositiveButton("Revisar", (dialog, which) -> {
+                ArrayList<String> missing = new ArrayList<>();
+                ArrayList<String> seen = new ArrayList<>();
+                for (String part : input.getText().toString().split("[,;\\n]")) {
                     String name = part.trim();
-                    if (name.isEmpty()) continue;
+                    String key = name.toLowerCase(Locale.ROOT);
+                    if (name.isEmpty() || seen.contains(key)) continue;
+                    seen.add(key);
                     Product product = findProduct(name);
                     if (product == null) {
-                        product = new Product(name, "Importados", "ud", Product.defaultImage(name), "");
-                        products.add(product);
+                        missing.add(name);
+                    } else {
+                        addProduct(product, 1);
                     }
-                    addProduct(product, 1);
                 }
                 save();
-                render();
+                if (missing.isEmpty()) render();
+                else showMissingProductsDialog(missing);
             })
+            .show();
+    }
+
+    private void showMissingProductsDialog(ArrayList<String> missing) {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = dialogForm();
+        for (String name : missing) {
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(8), 0, dp(8));
+            row.addView(label(name, 16, text, true), new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(textButton("Crear", v -> showCreateProductDialog(name, true)), new LinearLayout.LayoutParams(dp(92), dp(42)));
+            list.addView(row);
+        }
+        scroll.addView(list);
+        new AlertDialog.Builder(this)
+            .setTitle("No estan en el catalogo")
+            .setMessage("Crea solo los productos que quieras anadir. Podras poner nombre, categoria, imagen del movil, icono o emoji.")
+            .setView(scroll)
+            .setPositiveButton("Cerrar", (dialog, which) -> render())
             .show();
     }
 

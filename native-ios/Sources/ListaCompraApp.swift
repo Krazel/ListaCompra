@@ -220,12 +220,15 @@ final class ShoppingStore: ObservableObject {
     }
   }
 
-  func addCustomProduct(name: String, category: String, unit: String, emoji: String, assetName: String, customImageData: Data? = nil) {
+  @discardableResult
+  func addCustomProduct(name: String, category: String, unit: String, emoji: String, assetName: String, customImageData: Data? = nil) -> Product? {
     let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !cleaned.isEmpty else { return }
-    if products.contains(where: { $0.name.localizedCaseInsensitiveCompare(cleaned) == .orderedSame }) { return }
+    guard !cleaned.isEmpty else { return nil }
+    if let existing = products.first(where: { $0.name.localizedCaseInsensitiveCompare(cleaned) == .orderedSame }) { return existing }
     let safeUnit = unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "ud" : unit
-    products.append(Product(name: cleaned, category: category.isEmpty ? "Otros" : category, unit: safeUnit, icon: "cart", assetName: assetName, emoji: emoji, customImageData: customImageData, tint: products.count % 6))
+    let product = Product(name: cleaned, category: category.isEmpty ? "Otros" : category, unit: safeUnit, icon: "cart", assetName: assetName, emoji: emoji, customImageData: customImageData, tint: products.count % 6)
+    products.append(product)
+    return product
   }
 
   func updateProduct(_ product: Product, name: String, category: String, unit: String, emoji: String, assetName: String, customImageData: Data? = nil) {
@@ -273,18 +276,26 @@ final class ShoppingStore: ObservableObject {
     return product
   }
 
-  func importText(_ text: String, addMissingProducts: Bool) {
-    let names = text
+  func parsedNames(from text: String) -> [String] {
+    var seen: Set<String> = []
+    return text
       .components(separatedBy: CharacterSet(charactersIn: ",\n;"))
       .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
       .filter { !$0.isEmpty }
-    for name in names {
+      .filter { seen.insert($0.lowercased()).inserted }
+  }
+
+  @discardableResult
+  func importKnownProducts(from text: String) -> [String] {
+    var missing: [String] = []
+    for name in parsedNames(from: text) {
       if let product = products.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
         add(product: product, quantity: 1)
-      } else if addMissingProducts {
-        add(product: upsertProduct(name: name), quantity: 1)
+      } else {
+        missing.append(name)
       }
     }
+    return missing
   }
 
   var categories: [String] {
@@ -989,37 +1000,72 @@ struct BulkImportSheet: View {
   @Environment(\.dismiss) private var dismiss
   @FocusState private var focused: Bool
   @State private var text = ""
-  @State private var addMissing = true
+  @State private var missingNames: [String] = []
+  @State private var creatingName: String?
 
   var body: some View {
     NavigationStack {
-      VStack(alignment: .leading, spacing: 14) {
-        Header(title: "Pegar lista", subtitle: "Separa productos por coma o linea.")
-        Toggle("Anadir productos nuevos al catalogo", isOn: $addMissing)
-          .tint(AppColors.accent)
-          .foregroundStyle(AppColors.text)
-        TextEditor(text: $text)
-          .focused($focused)
-          .font(.system(size: 16, weight: .medium))
-          .foregroundStyle(AppColors.text)
-          .scrollContentBackground(.hidden)
-          .padding(12)
-          .frame(minHeight: 220)
-          .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
-        Button {
-          store.importText(text, addMissingProducts: addMissing)
-          dismiss()
-        } label: {
-          Label("Anadir a la lista", systemImage: "plus")
-            .frame(maxWidth: .infinity)
+      ScrollView {
+        VStack(alignment: .leading, spacing: 14) {
+          Header(title: "Pegar lista", subtitle: "Separa productos por coma o linea.")
+          TextEditor(text: $text)
+            .focused($focused)
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(AppColors.text)
+            .scrollContentBackground(.hidden)
+            .padding(12)
+            .frame(minHeight: 190)
+            .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
+          Button {
+            missingNames = store.importKnownProducts(from: text)
+            focused = false
+            if missingNames.isEmpty {
+              dismiss()
+            }
+          } label: {
+            Label("Anadir productos existentes", systemImage: "plus")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(PrimaryButtonStyle())
+          if !missingNames.isEmpty {
+            Panel {
+              Text("No estan en el catalogo")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(AppColors.text)
+              ForEach(missingNames, id: \.self) { name in
+                HStack(spacing: 10) {
+                  ResourceIcon(name: Product.defaultAsset(for: name), size: 40)
+                  VStack(alignment: .leading, spacing: 3) {
+                    Text(name)
+                      .font(.system(size: 15, weight: .bold))
+                      .foregroundStyle(AppColors.text)
+                    Text("Configura nombre, categoria e imagen")
+                      .font(.system(size: 12, weight: .medium))
+                      .foregroundStyle(AppColors.muted)
+                  }
+                  Spacer()
+                  Button("Crear") {
+                    creatingName = name
+                  }
+                  .font(.system(size: 13, weight: .bold))
+                  .foregroundStyle(.white)
+                  .padding(.horizontal, 12)
+                  .frame(height: 34)
+                  .background(AppColors.accent, in: RoundedRectangle(cornerRadius: 8))
+                }
+              }
+            }
+          }
         }
-        .buttonStyle(PrimaryButtonStyle())
-        Spacer()
+        .padding(20)
       }
-      .padding(20)
       .background(AppColors.background.ignoresSafeArea())
       .scrollDismissesKeyboard(.interactively)
       .simultaneousGesture(TapGesture().onEnded { focused = false })
+      .sheet(isPresented: Binding(get: { creatingName != nil }, set: { if !$0 { creatingName = nil } })) {
+        ProductEditorSheet(mode: .create(prefill: creatingName ?? "", addToList: true))
+          .environmentObject(store)
+      }
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancelar") { dismiss() }
@@ -1235,7 +1281,7 @@ struct ItemSection: View {
 }
 
 enum ProductEditorMode {
-  case create(prefill: String = "")
+  case create(prefill: String = "", addToList: Bool = false)
   case edit(Product)
 }
 
@@ -1256,7 +1302,7 @@ struct ProductEditorSheet: View {
   init(mode: ProductEditorMode) {
     self.mode = mode
     switch mode {
-    case .create(let prefill):
+    case .create(let prefill, _):
       _name = State(initialValue: prefill)
       _category = State(initialValue: "Otros")
       _unit = State(initialValue: "ud")
@@ -1369,8 +1415,10 @@ struct ProductEditorSheet: View {
             let savedPhoto = imageMode == "Foto" ? customImageData : nil
             let savedEmoji = imageMode == "Emoji" ? emoji : ""
             switch mode {
-            case .create(_):
-              store.addCustomProduct(name: name, category: category, unit: unit, emoji: savedEmoji, assetName: assetName, customImageData: savedPhoto)
+            case .create(_, let addToList):
+              if let product = store.addCustomProduct(name: name, category: category, unit: unit, emoji: savedEmoji, assetName: assetName, customImageData: savedPhoto), addToList {
+                store.add(product: product, quantity: 1)
+              }
             case .edit(let product):
               store.updateProduct(product, name: name, category: category, unit: unit, emoji: savedEmoji, assetName: assetName, customImageData: savedPhoto)
             }
@@ -1501,23 +1549,26 @@ struct ProductCard: View {
   @State private var choosingBaseLists = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: 8) {
       Button {
         store.add(product: product, quantity: quantity)
       } label: {
         ProductIcon(product: product, size: 46)
         Text(product.name)
-          .font(.system(size: 16, weight: .bold))
+          .font(.system(size: 15, weight: .bold))
           .foregroundStyle(AppColors.text)
-          .lineLimit(1)
-        Text(defaultDisplayUnit(for: product))
-          .font(.system(size: 12, weight: .bold))
+          .lineLimit(2)
+          .minimumScaleFactor(0.86)
+        Text(product.category)
+          .font(.system(size: 12, weight: .medium))
           .foregroundStyle(AppColors.muted)
-        Label("Anadir", systemImage: "plus.circle.fill")
+          .lineLimit(1)
+        Text("1 \(product.unit)")
           .font(.system(size: 13, weight: .bold))
           .foregroundStyle(AppColors.accent)
       }
       .buttonStyle(.plain)
+      Spacer(minLength: 0)
       HStack(spacing: 8) {
         Button { editing = true } label: {
           Image(systemName: "pencil")
@@ -1531,8 +1582,8 @@ struct ProductCard: View {
       .font(.system(size: 13, weight: .bold))
       .foregroundStyle(AppColors.accent)
     }
-    .padding(14)
-    .frame(maxWidth: .infinity, minHeight: 162, alignment: .leading)
+    .padding(12)
+    .frame(maxWidth: .infinity, minHeight: 176, alignment: .leading)
     .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 8))
     .sheet(isPresented: $editing) {
       ProductEditorSheet(mode: .edit(product))
@@ -1542,19 +1593,6 @@ struct ProductCard: View {
       ProductBaseListsSheet(product: product)
         .environmentObject(store)
     }
-  }
-}
-
-func defaultDisplayUnit(for product: Product) -> String {
-  switch product.name.lowercased() {
-  case "leche": return "1 L"
-  case "huevos": return "12 uds"
-  case "tomates": return "500 g"
-  case "platanos", "manzanas", "arroz": return "1 kg"
-  case "papel higienico": return "6 uds"
-  case "pasta", "cafe": return "1 paq"
-  case "congelados": return "1 bolsa"
-  default: return "1 \(product.unit)"
   }
 }
 
